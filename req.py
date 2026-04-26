@@ -183,36 +183,35 @@ with st.sidebar:
     st.markdown(f'<div style="margin:6px 0 16px">{status_html}</div>', unsafe_allow_html=True)
 
     st.markdown("---")
-    st.markdown("**Konfigurasi Kolom**")
+    st.markdown('<p style="font-size:12px;font-weight:700;color:#94A3B8;letter-spacing:.5px;margin-bottom:8px">KONFIGURASI KOLOM</p>', unsafe_allow_html=True)
 
-    with st.expander("Conversation Excel", expanded=False):
-        col_phone_conv = st.text_input("Kolom No HP", value="Contact")
-        col_origin     = st.text_input("Kolom Origin (IN/OUT)", value="Origin")
-        col_msg_type   = st.text_input("Kolom Message Type", value="Message Type")
-        col_msg        = st.text_input("Kolom Message", value="Message")
-        col_session    = st.text_input("Kolom Session ID", value="Session")
-        col_created    = st.text_input("Kolom Created At", value="Created At")
+    st.markdown('<p style="font-size:11px;font-weight:600;color:#CBD5E1;margin:4px 0 2px">Conversation Excel</p>', unsafe_allow_html=True)
+    col_phone_conv = st.text_input("No HP", value="Contact", key="conv_hp")
+    col_origin     = st.text_input("Origin (IN/OUT)", value="Origin", key="conv_orig")
+    col_msg_type   = st.text_input("Message Type", value="Message Type", key="conv_mt")
+    col_msg        = st.text_input("Message", value="Message", key="conv_msg")
+    col_session    = st.text_input("Session ID", value="Session", key="conv_sess")
+    col_created    = st.text_input("Created At", value="Created At", key="conv_date")
 
-    with st.expander("SC Excel", expanded=False):
-        col_nokontrak_sc = st.text_input("Kolom No Kontrak", value="NOKONTRAK")
-        col_phone_sc     = st.text_input("Kolom No HP (SC)", value="nohp", key="sc_hp")
-        col_lastpaid     = st.text_input("Kolom Last Paid Date", value="lastpaiddate")
-        col_ospokok      = st.text_input("Kolom OS Pokok", value="ospokok")
-        col_osar         = st.text_input("Kolom OS AR", value="osar")
-        col_custname     = st.text_input("Kolom Nama", value="custname")
-        col_branch       = st.text_input("Kolom Cabang", value="branchname")
+    st.markdown('<p style="font-size:11px;font-weight:600;color:#CBD5E1;margin:10px 0 2px">SC Excel</p>', unsafe_allow_html=True)
+    col_nokontrak_sc = st.text_input("No Kontrak", value="NOKONTRAK", key="sc_nok")
+    col_lastpaid     = st.text_input("Last Paid Date", value="lastpaiddate", key="sc_lp")
+    col_ospokok      = st.text_input("OS Pokok", value="ospokok", key="sc_osp")
+    col_osar         = st.text_input("OS AR", value="osar", key="sc_osar")
+    col_custname     = st.text_input("Nama Nasabah", value="custname", key="sc_nama")
+    col_branch       = st.text_input("Cabang", value="branchname", key="sc_cab")
 
-    with st.expander("Rekap WAI", expanded=False):
-        col_phone_rekap   = st.text_input("Kolom No HP (Rekap)", value="no_wa", key="rek_hp")
-        col_nokontrak_rek = st.text_input("Kolom No Kontrak (Rekap)", value="body_param_2")
-        col_tglbayar_rek  = st.text_input("Kolom Tgl Bayar", value="TGL BAYAR")
+    st.markdown('<p style="font-size:11px;font-weight:600;color:#CBD5E1;margin:10px 0 2px">Rekap WAI</p>', unsafe_allow_html=True)
+    col_phone_rekap   = st.text_input("No HP / no_wa", value="no_wa", key="rek_hp")
+    col_nokontrak_rek = st.text_input("No Kontrak / body_param_2", value="body_param_2", key="rek_nok")
+    col_tglbayar_rek  = st.text_input("Tgl Bayar (tidak dipakai)", value="Tanggal Bayar", key="rek_tgl", disabled=True)
 
-    with st.expander("Kata Kunci Klasifikasi Response", expanded=False):
-        st.caption("Pisah dengan koma")
-        kw_janji   = st.text_input("Janji Bayar", value="janji,bayar nanti,akan bayar,besok bayar")
-        kw_sudah   = st.text_input("Sudah Bayar", value="sudah bayar,udah bayar,transfer,tadi bayar")
-        kw_hubungi = st.text_input("Hubungi Kami", value="hubungi,kontak,cs,call center")
-        kw_nopush  = st.text_input("No Push", value="tidak bisa,belum bisa,jangan,stop,unsubscribe")
+    st.markdown('<p style="font-size:11px;font-weight:600;color:#CBD5E1;margin:10px 0 2px">Kata Kunci Klasifikasi</p>', unsafe_allow_html=True)
+    st.caption("Pisah dengan koma")
+    kw_janji   = st.text_input("Janji Bayar", value="janji,bayar nanti,akan bayar,besok bayar", key="kw_j")
+    kw_sudah   = st.text_input("Sudah Bayar", value="sudah bayar,udah bayar,transfer,tadi bayar", key="kw_s")
+    kw_hubungi = st.text_input("Hubungi Kami", value="hubungi,kontak,cs,call center", key="kw_h")
+    kw_nopush  = st.text_input("No Push", value="tidak bisa,belum bisa,jangan,stop,unsubscribe", key="kw_n")
 
 has_broadcast = f_sum is not None
 has_conv      = f_conv is not None
