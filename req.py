@@ -17,7 +17,32 @@ st.markdown("""
 #MainMenu, footer, header { visibility: hidden; }
 .block-container { padding: 1.5rem 2rem 4rem; max-width: 1400px; }
 
-section[data-testid="stFileUploader"] { background:#fff; border-radius:10px; padding:12px 16px; border:1px solid #E2E8F0; }
+/* File uploader — sidebar friendly */
+section[data-testid="stFileUploader"] { background:transparent; border-radius:8px; padding:0; border:none; }
+section[data-testid="stFileUploader"] > div { background:transparent; }
+[data-testid="stFileUploaderDropzone"] {
+    background: rgba(255,255,255,0.04) !important;
+    border: 1.5px dashed rgba(255,255,255,0.15) !important;
+    border-radius: 8px !important;
+    padding: 10px !important;
+    min-height: unset !important;
+}
+[data-testid="stFileUploaderDropzone"]:hover {
+    border-color: rgba(255,255,255,0.35) !important;
+    background: rgba(255,255,255,0.07) !important;
+}
+[data-testid="stFileUploaderDropzone"] p,
+[data-testid="stFileUploaderDropzone"] span,
+[data-testid="stFileUploaderDropzone"] small {
+    font-size: 11px !important;
+    color: rgba(255,255,255,0.45) !important;
+}
+[data-testid="stFileUploaderDropzone"] button {
+    padding: 4px 12px !important;
+    font-size: 11px !important;
+    height: auto !important;
+    min-height: unset !important;
+}
 
 .stTabs [data-baseweb="tab-list"] { background:#E2E8F0; border-radius:8px; padding:4px; gap:2px; }
 .stTabs [data-baseweb="tab"]      { border-radius:6px; color:#64748B; font-size:13px; font-weight:500; padding:6px 18px; }
@@ -63,6 +88,32 @@ section[data-testid="stFileUploader"] { background:#fff; border-radius:10px; pad
 
 .warn-box { background:#FFFBEB; border:1px solid #FDE68A; border-left:4px solid #F59E0B;
             border-radius:8px; padding:11px 16px; font-size:12px; color:#92400E; margin-bottom:12px; }
+
+/* Sidebar uploader: hide the redundant drag-drop text, keep button only */
+section[data-testid="stSidebar"] [data-testid="stFileUploaderDropzoneInstructions"] {
+    display: none !important;
+}
+section[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] {
+    padding: 8px 10px !important;
+    min-height: unset !important;
+}
+section[data-testid="stSidebar"] [data-testid="stFileUploader"] label {
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    color: #CBD5E1 !important;
+    margin-bottom: 4px !important;
+}
+section[data-testid="stSidebar"] [data-testid="stFileUploader"] {
+    margin-bottom: 8px !important;
+}
+/* Uploaded file name chip */
+section[data-testid="stSidebar"] [data-testid="stFileUploaderFile"] {
+    background: rgba(34,197,94,0.12) !important;
+    border: 1px solid rgba(34,197,94,0.3) !important;
+    border-radius: 6px !important;
+    padding: 4px 8px !important;
+    font-size: 11px !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
