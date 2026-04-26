@@ -615,8 +615,12 @@ if conv is not None and "Response WA" in tab_idx:
         type_labels     = ["Semua Type"] + [f"{t} -- {mt_lbl.get(t, t)}" for t in available_types]
 
         st.markdown('<p class="sh">Filter Message Type</p>', unsafe_allow_html=True)
-        sel_type_label = st.radio("Pilih tipe pesan:", options=type_labels, index=0,
-                                   horizontal=True, label_visibility="collapsed")
+        sel_type_label = st.selectbox(
+            "Pilih tipe pesan:",
+            options=type_labels,
+            index=0,
+            label_visibility="collapsed"
+        )
         sel_type = type_options[type_labels.index(sel_type_label)]
         filtered_in_df = in_df if sel_type == "Semua Type" else in_df[in_df["_type"] == sel_type]
 
