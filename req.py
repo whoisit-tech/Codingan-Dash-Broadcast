@@ -85,34 +85,83 @@ st.markdown("""
 
 
 # ═══════════════════════════════════════════════════════════
-# UPLOAD SECTION
+# SIDEBAR — UPLOAD + CONFIG
 # ═══════════════════════════════════════════════════════════
-st.markdown("### Upload File")
-u1, u2, u3, u4 = st.columns(4)
-with u1:
+with st.sidebar:
+    st.markdown("""
+    <div style="background:#1E3A5F;border-radius:8px;padding:10px 14px;margin-bottom:14px">
+      <span style="color:#fff;font-size:14px;font-weight:700">Upload File</span>
+      <span style="color:rgba(255,255,255,.5);font-size:11px;display:block;margin-top:2px">Semua format Excel (.xlsx)</span>
+    </div>
+    """, unsafe_allow_html=True)
+
     f_sum = st.file_uploader(
-        "Summary Broadcast (Excel)",
+        "1. Summary Broadcast",
         type=["xlsx", "xls"],
         help="Kolom: DateUploaded, Sent, Delivered, Read, Failed, Total"
     )
-with u2:
     f_conv = st.file_uploader(
-        "Conversation / Response WA (Excel)",
+        "2. Conversation / Response WA",
         type=["xlsx", "xls"],
-        help="Kolom: Origin, Message Type, Message, Session, Created At, dst"
+        help="Kolom: Origin, Message Type, Message, Session, Created At"
     )
-with u3:
     f_sc = st.file_uploader(
-        "File SC Jan-Mar (Excel)",
+        "3. File SC Jan-Mar",
         type=["xlsx", "xls"],
         help="Sheet: Sc Januari, Sc Februari, Sc Maret"
     )
-with u4:
     f_rekap = st.file_uploader(
-        "Rekap WAI 4W (Excel)",
+        "4. Rekap WAI 4W",
         type=["xlsx", "xls"],
-        help="File rekap pembayaran, kolom No WA dan Tgl Bayar"
+        help="Kolom No WA dan Tgl Bayar"
     )
+
+    files_status = {
+        "Summary": f_sum is not None,
+        "Conversation": f_conv is not None,
+        "SC": f_sc is not None,
+        "Rekap WAI": f_rekap is not None,
+    }
+    status_html = "".join([
+        f'<span style="display:inline-flex;align-items:center;gap:4px;margin:2px 4px 2px 0;'
+        f'font-size:10.5px;font-weight:600;padding:2px 8px;border-radius:10px;'
+        f'background:{"#DCFCE7" if v else "#FEE2E2"};color:{"#15803D" if v else "#B91C1C"}">'
+        f'{"+" if v else "-"} {k}</span>'
+        for k, v in files_status.items()
+    ])
+    st.markdown(f'<div style="margin:6px 0 16px">{status_html}</div>', unsafe_allow_html=True)
+
+    st.markdown("---")
+    st.markdown("**Konfigurasi Kolom**")
+
+    with st.expander("Conversation Excel", expanded=False):
+        col_phone_conv = st.text_input("Kolom No HP", value="Contact")
+        col_origin     = st.text_input("Kolom Origin (IN/OUT)", value="Origin")
+        col_msg_type   = st.text_input("Kolom Message Type", value="Message Type")
+        col_msg        = st.text_input("Kolom Message", value="Message")
+        col_session    = st.text_input("Kolom Session ID", value="Session")
+        col_created    = st.text_input("Kolom Created At", value="Created At")
+
+    with st.expander("SC Excel", expanded=False):
+        col_nokontrak_sc = st.text_input("Kolom No Kontrak", value="NOKONTRAK")
+        col_phone_sc     = st.text_input("Kolom No HP (SC)", value="nohp", key="sc_hp")
+        col_lastpaid     = st.text_input("Kolom Last Paid Date", value="lastpaiddate")
+        col_ospokok      = st.text_input("Kolom OS Pokok", value="ospokok")
+        col_osar         = st.text_input("Kolom OS AR", value="osar")
+        col_custname     = st.text_input("Kolom Nama", value="custname")
+        col_branch       = st.text_input("Kolom Cabang", value="branchname")
+
+    with st.expander("Rekap WAI", expanded=False):
+        col_phone_rekap   = st.text_input("Kolom No HP (Rekap)", value="no_wa", key="rek_hp")
+        col_nokontrak_rek = st.text_input("Kolom No Kontrak (Rekap)", value="body_param_2")
+        col_tglbayar_rek  = st.text_input("Kolom Tgl Bayar", value="TGL BAYAR")
+
+    with st.expander("Kata Kunci Klasifikasi Response", expanded=False):
+        st.caption("Pisah dengan koma")
+        kw_janji   = st.text_input("Janji Bayar", value="janji,bayar nanti,akan bayar,besok bayar")
+        kw_sudah   = st.text_input("Sudah Bayar", value="sudah bayar,udah bayar,transfer,tadi bayar")
+        kw_hubungi = st.text_input("Hubungi Kami", value="hubungi,kontak,cs,call center")
+        kw_nopush  = st.text_input("No Push", value="tidak bisa,belum bisa,jangan,stop,unsubscribe")
 
 has_broadcast = f_sum is not None
 has_conv      = f_conv is not None
@@ -121,60 +170,22 @@ has_rekap     = f_rekap is not None
 has_realisasi = has_conv and (has_sc or has_rekap)
 
 if not has_broadcast:
-    st.markdown(
-        '<div class="info-box">Upload minimal <b>Summary Broadcast (Excel)</b> untuk memulai dashboard. '
-        'File lain opsional untuk fitur tambahan.</div>',
-        unsafe_allow_html=True
-    )
+    st.markdown("""
+    <div style="background:#fff;border:1px solid #E2E8F0;border-radius:12px;padding:48px 32px;text-align:center;margin-top:24px">
+      <div style="font-size:16px;font-weight:700;color:#1E293B;margin-bottom:6px">Upload File untuk Memulai</div>
+      <div style="font-size:13px;color:#64748B;max-width:440px;margin:0 auto">
+        Upload file via panel kiri. Minimal <b>Summary Broadcast</b> untuk melihat data broadcast.
+        Tambahkan file lainnya untuk fitur realisasi bayar.
+      </div>
+      <div style="margin-top:20px;display:flex;justify-content:center;gap:8px;flex-wrap:wrap">
+        <span style="background:#EFF6FF;color:#1D4ED8;border-radius:20px;padding:4px 12px;font-size:11px;font-weight:600">1. Summary Broadcast</span>
+        <span style="background:#F0FDF4;color:#15803D;border-radius:20px;padding:4px 12px;font-size:11px;font-weight:600">2. Conversation WA</span>
+        <span style="background:#FFFBEB;color:#B45309;border-radius:20px;padding:4px 12px;font-size:11px;font-weight:600">3. File SC</span>
+        <span style="background:#F3E8FF;color:#7C3AED;border-radius:20px;padding:4px 12px;font-size:11px;font-weight:600">4. Rekap WAI</span>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
     st.stop()
-
-st.markdown("---")
-
-
-# ═══════════════════════════════════════════════════════════
-# SIDEBAR CONFIG
-# ═══════════════════════════════════════════════════════════
-with st.sidebar:
-    st.markdown("### Konfigurasi Kolom")
-
-    st.markdown("**Summary Broadcast**")
-    col_date_sum = st.text_input("Kolom Tanggal (Summary)", value="DateUploaded")
-
-    st.markdown("---")
-    st.markdown("**Conversation Excel**")
-    col_phone_conv = st.text_input("Kolom No HP di Conversation", value="Contact",
-                                    help="Kolom yang berisi no telpon nasabah")
-    col_origin     = st.text_input("Kolom Origin (IN/OUT)", value="Origin")
-    col_msg_type   = st.text_input("Kolom Message Type", value="Message Type")
-    col_msg        = st.text_input("Kolom Message / Isi Pesan", value="Message")
-    col_session    = st.text_input("Kolom Session ID", value="Session")
-    col_created    = st.text_input("Kolom Created At", value="Created At")
-
-    st.markdown("---")
-    st.markdown("**SC Excel**")
-    col_nokontrak_sc = st.text_input("Kolom No Kontrak (SC)", value="NOKONTRAK")
-    col_phone_sc     = st.text_input("Kolom No HP (SC)", value="nohp",
-                                      help="Untuk join ke conversation")
-    col_lastpaid     = st.text_input("Kolom Last Paid Date (SC)", value="lastpaiddate")
-    col_ospokok      = st.text_input("Kolom OS Pokok (SC)", value="ospokok")
-    col_osar         = st.text_input("Kolom OS AR (SC)", value="osar")
-    col_custname     = st.text_input("Kolom Nama (SC)", value="custname")
-    col_branch       = st.text_input("Kolom Cabang (SC)", value="branchname")
-
-    st.markdown("---")
-    st.markdown("**Rekap WAI**")
-    col_phone_rekap   = st.text_input("Kolom No HP (Rekap)", value="no_wa",
-                                       help="Untuk join ke conversation")
-    col_nokontrak_rek = st.text_input("Kolom No Kontrak (Rekap)", value="body_param_2")
-    col_tglbayar_rek  = st.text_input("Kolom Tgl Bayar (Rekap)", value="TGL BAYAR")
-
-    st.markdown("---")
-    st.markdown("**Kata Kunci Klasifikasi Response**")
-    st.markdown('<p style="font-size:11px;color:#64748B">Pisah dengan koma</p>', unsafe_allow_html=True)
-    kw_janji   = st.text_input("Janji Bayar", value="janji,bayar nanti,akan bayar,besok bayar")
-    kw_sudah   = st.text_input("Sudah Bayar", value="sudah bayar,udah bayar,transfer,tadi bayar")
-    kw_hubungi = st.text_input("Hubungi Kami", value="hubungi,kontak,cs,call center")
-    kw_nopush  = st.text_input("No Push", value="tidak bisa,belum bisa,jangan,stop,unsubscribe")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -700,9 +711,9 @@ if has_realisasi and "Realisasi Bayar" in tab_idx:
 
         st.markdown("""
         <div class="info-box">
-        <b>Cara kerja tab ini:</b> Nasabah yang merespons WA (Conversation Excel) di-join dengan data SC atau Rekap WAI via <b>No HP</b>.
-        Dari situ ketauan siapa yang klik "Janji Bayar", "Sudah Bayar", dll, beneran bayar atau tidak berdasarkan
-        <b>lastpaiddate</b> di SC atau <b>Tgl Bayar</b> di Rekap WAI.
+        <b>Alur join data:</b>
+        <b>Conversation.Contact</b> (no HP nasabah) &rarr; match ke <b>Rekap.no_wa</b> &rarr; ambil <b>body_param_2</b> (no kontrak) &rarr; match ke <b>SC.NOKONTRAK</b> &rarr; cek <b>lastpaiddate</b>.
+        Kalau tidak match di SC, fallback ke kolom <b>Tanggal Bayar</b> di Rekap.
         </div>
         """, unsafe_allow_html=True)
 
@@ -720,39 +731,16 @@ if has_realisasi and "Realisasi Bayar" in tab_idx:
             lambda m: classify_response(m, kw_janji, kw_sudah, kw_hubungi, kw_nopush)
         )
 
-        paid_lookup = {}
+        # ── Step 1: Bangun lookup Rekap: no_wa (norm) -> {nokontrak, tgl_bayar} ──
+        # Conversation.Contact (no HP nasabah) == Rekap.no_wa
+        # Rekap.body_param_2 == nokontrak nasabah
+        # Rekap.Tanggal Bayar == tgl bayar aktual
 
-        if df_sc is not None:
-            sc_phone_col = find_col(df_sc, [col_phone_sc, "nohp", "NoHP", "no_hp", "HP", "hp"])
-            sc_paid_col  = find_col(df_sc, [col_lastpaid, "lastpaiddate", "LastPaidDate"])
-            sc_nok_col   = find_col(df_sc, [col_nokontrak_sc, "NOKONTRAK", "nokontrak"])
-            sc_nama_col  = find_col(df_sc, [col_custname, "custname", "CustName", "nama"])
-
-            if sc_phone_col:
-                for _, row in df_sc.iterrows():
-                    norm = normalize_phone(str(row.get(sc_phone_col, "")))
-                    if not norm or norm == "62":
-                        continue
-                    lp    = row.get(sc_paid_col) if sc_paid_col else None
-                    bayar = pd.notna(lp) and str(lp).strip() not in ["", "nan", "NaT", "None", "0"]
-                    paid_lookup[norm] = {
-                        "bayar":     bayar,
-                        "tgl_bayar": str(lp) if bayar else None,
-                        "nokontrak": str(row.get(sc_nok_col, "")) if sc_nok_col else "",
-                        "nama":      str(row.get(sc_nama_col, "")) if sc_nama_col else "",
-                        "source":    "SC"
-                    }
-            else:
-                st.markdown(
-                    f'<div class="warn-box">Kolom No HP tidak ditemukan di SC (dicari: <b>{col_phone_sc}</b>). '
-                    f'Kolom tersedia: {", ".join(df_sc.columns[:15].tolist())}</div>',
-                    unsafe_allow_html=True
-                )
-
+        rek_lookup = {}   # {phone_norm: {nokontrak, tgl_bayar_rek, bayar_rek}}
         if df_rekap is not None:
-            rek_phone_col = find_col(df_rekap, [col_phone_rekap, "no_wa", "NoWA", "nowa", "hp", "nohp"])
-            rek_paid_col  = find_col(df_rekap, [col_tglbayar_rek, "TGL BAYAR", "tgl_bayar"])
-            rek_nok_col   = find_col(df_rekap, [col_nokontrak_rek, "NOKONTRAK", "body_param_2", "body_param_1"])
+            rek_phone_col = find_col(df_rekap, ["no_wa", "NoWA", "nowa", col_phone_rekap])
+            rek_paid_col  = find_col(df_rekap, ["Tanggal Bayar", "TGL BAYAR", "tgl_bayar", col_tglbayar_rek])
+            rek_nok_col   = find_col(df_rekap, ["body_param_2", "body_param_1", col_nokontrak_rek, "NOKONTRAK"])
 
             if rek_phone_col:
                 for _, row in df_rekap.iterrows():
@@ -761,26 +749,82 @@ if has_realisasi and "Realisasi Bayar" in tab_idx:
                         continue
                     lp    = row.get(rek_paid_col) if rek_paid_col else None
                     bayar = pd.notna(lp) and str(lp).strip() not in ["", "nan", "NaT", "None", "0"]
-                    if norm not in paid_lookup or (bayar and not paid_lookup[norm]["bayar"]):
-                        paid_lookup[norm] = {
-                            "bayar":     bayar,
-                            "tgl_bayar": str(lp) if bayar else None,
-                            "nokontrak": str(row.get(rek_nok_col, "")) if rek_nok_col else "",
-                            "nama":      "",
-                            "source":    "Rekap WAI"
+                    nok   = str(row.get(rek_nok_col, "")).strip() if rek_nok_col else ""
+                    # Prioritas: kalau sudah ada entry tapi belum bayar, overwrite kalau sekarang bayar
+                    if norm not in rek_lookup or (bayar and not rek_lookup[norm]["bayar_rek"]):
+                        rek_lookup[norm] = {
+                            "nokontrak":    nok,
+                            "tgl_bayar_rek": str(lp) if bayar else None,
+                            "bayar_rek":    bayar,
                         }
             else:
                 st.markdown(
-                    f'<div class="warn-box">Kolom No HP tidak ditemukan di Rekap (dicari: <b>{col_phone_rekap}</b>). '
-                    f'Kolom tersedia: {", ".join(df_rekap.columns[:15].tolist())}</div>',
+                    f'<div class="warn-box">Kolom No HP tidak ditemukan di Rekap (dicari: <b>no_wa</b>). '
+                    f'Kolom tersedia: {", ".join(df_rekap.columns[:20].tolist())}</div>',
                     unsafe_allow_html=True
                 )
 
+        # ── Step 2: Bangun lookup SC: nokontrak -> {lastpaiddate, nama} ──
+        sc_lookup = {}   # {nokontrak: {bayar_sc, tgl_bayar_sc, nama}}
+        if df_sc is not None:
+            sc_nok_col   = find_col(df_sc, ["NOKONTRAK", "nokontrak", col_nokontrak_sc])
+            sc_paid_col  = find_col(df_sc, ["lastpaiddate", "LastPaidDate", col_lastpaid])
+            sc_nama_col  = find_col(df_sc, ["custname", "CustName", col_custname])
+
+            if sc_nok_col:
+                for _, row in df_sc.iterrows():
+                    nok = str(row.get(sc_nok_col, "")).strip()
+                    if not nok or nok in ["", "nan", "None"]:
+                        continue
+                    lp    = row.get(sc_paid_col) if sc_paid_col else None
+                    bayar = pd.notna(lp) and str(lp).strip() not in ["", "nan", "NaT", "None", "0"]
+                    sc_lookup[nok] = {
+                        "bayar_sc":    bayar,
+                        "tgl_bayar_sc": str(lp) if bayar else None,
+                        "nama":        str(row.get(sc_nama_col, "")) if sc_nama_col else "",
+                    }
+            else:
+                st.markdown(
+                    f'<div class="warn-box">Kolom NOKONTRAK tidak ditemukan di SC. '
+                    f'Kolom tersedia: {", ".join(df_sc.columns[:20].tolist())}</div>',
+                    unsafe_allow_html=True
+                )
+
+        # ── Step 3: Merge ke session — chain: Contact → Rekap → SC ──
         def get_paid_info(phone_norm):
-            return paid_lookup.get(phone_norm, {
-                "bayar": None, "tgl_bayar": None,
-                "nokontrak": "", "nama": "", "source": "Tidak Ditemukan"
-            })
+            # Cari di rekap via no HP
+            rek = rek_lookup.get(phone_norm)
+            if rek is None:
+                return {
+                    "bayar": None, "tgl_bayar": None,
+                    "nokontrak": "", "nama": "", "source": "Tidak Ditemukan di Rekap"
+                }
+
+            nokontrak = rek["nokontrak"]
+
+            # Cari di SC via nokontrak yang didapat dari rekap
+            sc = sc_lookup.get(nokontrak) if nokontrak else None
+
+            if sc is not None:
+                # Pakai data SC sebagai sumber kebenaran bayar
+                bayar    = sc["bayar_sc"]
+                tgl      = sc["tgl_bayar_sc"] or rek["tgl_bayar_rek"]
+                nama     = sc["nama"]
+                source   = "SC"
+            else:
+                # Fallback: pakai tgl bayar dari rekap saja
+                bayar    = rek["bayar_rek"]
+                tgl      = rek["tgl_bayar_rek"]
+                nama     = ""
+                source   = "Rekap WAI (SC tidak match)"
+
+            return {
+                "bayar":     bayar,
+                "tgl_bayar": tgl,
+                "nokontrak": nokontrak,
+                "nama":      nama,
+                "source":    source,
+            }
 
         sess_grp["_paid_info"]  = sess_grp["_phone_norm"].apply(get_paid_info)
         sess_grp["_bayar"]      = sess_grp["_paid_info"].apply(lambda x: x["bayar"])
@@ -1007,11 +1051,18 @@ if has_realisasi and "Realisasi Bayar" in tab_idx:
             )
 
         cov_pct = found_in_db / total_resp if total_resp else 0
+        n_rekap_match  = sess_grp["_datasource"].str.contains("SC|Rekap", na=False).sum()
+        n_rekap_only   = sess_grp["_datasource"].str.contains("Rekap WAI", na=False).sum()
+        n_sc_match     = sess_grp["_datasource"].str.contains("^SC$", na=False).sum()
+        n_not_found    = sess_grp["_datasource"].str.contains("Tidak Ditemukan", na=False).sum()
+
         st.markdown(f"""
         <div class="warn-box" style="margin-top:16px">
-        <b>Coverage:</b> {found_in_db:,} dari {total_resp:,} sesi ({cov_pct:.1%}) berhasil di-match ke database SC/Rekap.
-        {not_found:,} sesi tidak ditemukan - kemungkinan format No HP berbeda atau nasabah belum ada di file SC/Rekap periode ini.
-        Pastikan nama kolom No HP di sidebar sudah sesuai dengan nama kolom di masing-masing file.
+        <b>Coverage:</b> {found_in_db:,} dari {total_resp:,} sesi ({cov_pct:.1%}) berhasil di-match.
+        <br>Match ke SC: <b>{n_sc_match:,}</b> &nbsp;|&nbsp;
+        Fallback Rekap saja: <b>{n_rekap_only:,}</b> &nbsp;|&nbsp;
+        Tidak ditemukan di Rekap: <b>{n_not_found:,}</b>
+        <br>Kalau banyak yang tidak ditemukan, pastikan format No HP di Conversation sama dengan di kolom <b>no_wa</b> Rekap WAI.
         </div>
         """, unsafe_allow_html=True)
 
