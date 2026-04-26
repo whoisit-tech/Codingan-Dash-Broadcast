@@ -763,8 +763,8 @@ if has_realisasi and "Realisasi Bayar" in tab_idx:
         st.markdown("""
         <div class="info-box">
         <b>Alur join data:</b>
-        <b>Conversation.Contact</b> (no HP nasabah) &rarr; match ke <b>Rekap.no_wa</b> &rarr; ambil <b>body_param_2</b> (no kontrak) &rarr; match ke <b>SC.NOKONTRAK</b> &rarr; cek <b>lastpaiddate</b>.
-        Kalau tidak match di SC, fallback ke kolom <b>Tanggal Bayar</b> di Rekap.
+        <b>Conversation.Contact</b> (no HP) &rarr; <b>Rekap.no_wa</b> &rarr; ambil <b>body_param_2</b> (no kontrak) &rarr; <b>SC.NOKONTRAK</b> &rarr; cek <b>lastpaiddate</b>.
+        Status bayar <b>hanya dari SC.lastpaiddate</b>. Rekap dipakai sebagai jembatan no HP ke no kontrak saja.
         </div>
         """, unsafe_allow_html=True)
 
@@ -790,7 +790,7 @@ if has_realisasi and "Realisasi Bayar" in tab_idx:
         rek_lookup = {}   # {phone_norm: {nokontrak, tgl_bayar_rek, bayar_rek}}
         if df_rekap is not None:
             rek_phone_col = find_col(df_rekap, ["no_wa", "NoWA", "nowa", col_phone_rekap])
-            rek_paid_col  = find_col(df_rekap, ["Tanggal Bayar", "TGL BAYAR", "tgl_bayar", col_tglbayar_rek])
+            rek_paid_col  = None  # Tidak dipakai — status bayar hanya dari SC.lastpaiddate
             rek_nok_col   = find_col(df_rekap, ["body_param_2", "body_param_1", col_nokontrak_rek, "NOKONTRAK"])
 
             if rek_phone_col:
@@ -798,15 +798,12 @@ if has_realisasi and "Realisasi Bayar" in tab_idx:
                     norm = normalize_phone(str(row.get(rek_phone_col, "")))
                     if not norm or norm == "62":
                         continue
-                    lp    = row.get(rek_paid_col) if rek_paid_col else None
-                    bayar = pd.notna(lp) and str(lp).strip() not in ["", "nan", "NaT", "None", "0"]
-                    nok   = str(row.get(rek_nok_col, "")).strip() if rek_nok_col else ""
-                    # Prioritas: kalau sudah ada entry tapi belum bayar, overwrite kalau sekarang bayar
-                    if norm not in rek_lookup or (bayar and not rek_lookup[norm]["bayar_rek"]):
+                    nok = str(row.get(rek_nok_col, "")).strip() if rek_nok_col else ""
+                    # Rekap hanya dipakai untuk mapping no HP -> no kontrak
+                    # Status bayar HANYA dari SC.lastpaiddate, bukan dari Rekap
+                    if norm not in rek_lookup:
                         rek_lookup[norm] = {
-                            "nokontrak":    nok,
-                            "tgl_bayar_rek": str(lp) if bayar else None,
-                            "bayar_rek":    bayar,
+                            "nokontrak": nok,
                         }
             else:
                 st.markdown(
@@ -816,6 +813,7 @@ if has_realisasi and "Realisasi Bayar" in tab_idx:
                 )
 
         # ── Step 2: Bangun lookup SC: nokontrak -> {lastpaiddate, nama} ──
+        # SC adalah SATU-SATUNYA sumber kebenaran status bayar
         sc_lookup = {}   # {nokontrak: {bayar_sc, tgl_bayar_sc, nama}}
         if df_sc is not None:
             sc_nok_col   = find_col(df_sc, ["NOKONTRAK", "nokontrak", col_nokontrak_sc])
@@ -843,7 +841,7 @@ if has_realisasi and "Realisasi Bayar" in tab_idx:
 
         # ── Step 3: Merge ke session — chain: Contact → Rekap → SC ──
         def get_paid_info(phone_norm):
-            # Cari di rekap via no HP
+            # Step 1: cari no kontrak via Rekap (mapping no HP -> no kontrak)
             rek = rek_lookup.get(phone_norm)
             if rek is None:
                 return {
@@ -853,29 +851,27 @@ if has_realisasi and "Realisasi Bayar" in tab_idx:
 
             nokontrak = rek["nokontrak"]
 
-            # Cari di SC via nokontrak yang didapat dari rekap
+            # Step 2: cek status bayar HANYA dari SC.lastpaiddate
             sc = sc_lookup.get(nokontrak) if nokontrak else None
 
             if sc is not None:
-                # Pakai data SC sebagai sumber kebenaran bayar
-                bayar    = sc["bayar_sc"]
-                tgl      = sc["tgl_bayar_sc"] or rek["tgl_bayar_rek"]
-                nama     = sc["nama"]
-                source   = "SC"
+                return {
+                    "bayar":     sc["bayar_sc"],
+                    "tgl_bayar": sc["tgl_bayar_sc"],
+                    "nokontrak": nokontrak,
+                    "nama":      sc["nama"],
+                    "source":    "SC",
+                }
             else:
-                # Fallback: pakai tgl bayar dari rekap saja
-                bayar    = rek["bayar_rek"]
-                tgl      = rek["tgl_bayar_rek"]
-                nama     = ""
-                source   = "Rekap WAI (SC tidak match)"
-
-            return {
-                "bayar":     bayar,
-                "tgl_bayar": tgl,
-                "nokontrak": nokontrak,
-                "nama":      nama,
-                "source":    source,
-            }
+                # Ketemu di Rekap tapi no kontrak tidak ada di SC
+                # Status bayar UNKNOWN karena tidak bisa cek lastpaiddate
+                return {
+                    "bayar":     None,
+                    "tgl_bayar": None,
+                    "nokontrak": nokontrak,
+                    "nama":      "",
+                    "source":    "Rekap ada, SC tidak match",
+                }
 
         sess_grp["_paid_info"]  = sess_grp["_phone_norm"].apply(get_paid_info)
         sess_grp["_bayar"]      = sess_grp["_paid_info"].apply(lambda x: x["bayar"])
