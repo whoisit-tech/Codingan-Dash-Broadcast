@@ -557,6 +557,7 @@ tab_labels = ["Rekap Upload"]
 if conv is not None:
     tab_labels.append("Response WA")
     tab_labels.append("Isi Pesan")
+    tab_labels.append("Funnel Response")
 if has_realisasi:
     tab_labels.append("Realisasi Bayar")
 
@@ -1216,6 +1217,603 @@ if has_realisasi and "Realisasi Bayar" in tab_idx:
         <br>Kalau banyak yang tidak ditemukan, pastikan format No HP di Conversation sama dengan di kolom <b>no_wa</b> Rekap WAI.
         </div>
         """, unsafe_allow_html=True)
+
+
+# ═══════════════════════════════════════════════════════════
+# TAB — FUNNEL RESPONSE
+# ═══════════════════════════════════════════════════════════
+if conv is not None and "Funnel Response" in tab_idx:
+    with tab_objs[tab_idx["Funnel Response"]]:
+        import re as _re
+
+        fr_df = conv[conv["_orig"] == "IN"].copy()
+        if sel_month != "Semua Bulan" and fr_df["_date"].notna().any():
+            fr_df = fr_df[fr_df["_date"].dt.strftime("%B %Y") == sel_month]
+
+        # Gabung semua pesan per sesi
+        sess_all = fr_df.groupby("_sess").agg(
+            _phone=("_phone", "first"),
+            _all_msgs=("_msg", lambda x: " ".join(x.dropna().astype(str))),
+            _date=("_date", "first"),
+        ).reset_index()
+        sess_all["_phone_norm"] = sess_all["_phone"].apply(normalize_phone)
+
+        total_sesi = len(sess_all)
+
+        # ── Level 1: klasifikasi utama ──────────────────────
+        def lvl1(msg):
+            m = msg.lower()
+            if _re.search(r"sudah\s*bayar|udah\s*bayar|transfer|tadi\s*bayar|sudah\s*lunas|lunas", m):
+                return "Sudah Bayar"
+            if _re.search(r"janji|akan\s*bayar|mau\s*bayar|siap\s*bayar|besok\s*bayar|bayar\s*nanti", m):
+                return "Janji Bayar"
+            if _re.search(r"hubungi|kontak\s*kami|cs|call\s*center|ke\s*kantor|datang\s*ke", m):
+                return "Hubungi Kami"
+            if _re.search(r"tidak\s*bisa|gabisa|belum\s*bisa|blm\s*bisa|gak\s*bisa|tidak\s*mampu|broken", m):
+                return "Broken Promise"
+            if _re.search(r"salah\s*nomor|bukan\s*saya|bukan\s*nasabah|wrong\s*number|tidak\s*kenal", m):
+                return "Wrong Number"
+            return "No Push"
+
+        # ── Level 2: breakdown per kategori ─────────────────
+        def lvl2_sudah(msg, bayar_sc):
+            if bayar_sc is True:
+                return "Beneran Bayar"
+            if bayar_sc is False:
+                return "Tidak Bayar"
+            return "Unknown (tidak ada di SC)"
+
+        def lvl2_janji(msg, bayar_sc):
+            if bayar_sc is True:
+                return "Real Promise"
+            if bayar_sc is False:
+                return "Broken Promise"
+            return "Unknown"
+
+        def lvl2_hubungi(msg):
+            m = msg.lower()
+            if _re.search(r"autodebet|auto\s*debet", m):          return "Minta Autodebet"
+            if _re.search(r"sudah\s*bayar|udah\s*bayar|transfer", m): return "Bayar"
+            if _re.search(r"cara\s*bayar|bayar\s*gimana|bagaimana\s*bayar", m): return "Minta Cara Bayar"
+            if _re.search(r"nego|denda|keringanan|diskon|cicil", m): return "Nego Denda"
+            if _re.search(r"ke\s*kantor|datang|kantor", m):        return "Ke Kantor"
+            return "Unknown"
+
+        def lvl2_broken(msg):
+            m = msg.lower()
+            if _re.search(r"tidak\s*bisa\s*bayar|gabisa\s*bayar|belum\s*ada\s*uang|belum\s*ada\s*dana", m): return "Tidak Bisa Bayar"
+            if _re.search(r"cicil|nyicil|dicicil|rubah\s*jt|reschedule|restruktur", m): return "Minta Cicil/Rubah JT"
+            if _re.search(r"ke\s*kantor|datang|langsung", m):      return "Ke Kantor"
+            if _re.search(r"nego|denda|keringanan", m):             return "Nego Denda"
+            return "Lainnya"
+
+        # ── Build paid lookup (sama seperti tab realisasi) ───
+        _rek_lkp = {}
+        if df_rekap is not None:
+            _rpc = find_col(df_rekap, ["no_wa", col_phone_rekap])
+            _rnk = find_col(df_rekap, ["body_param_2", col_nokontrak_rek])
+            if _rpc:
+                for _, row in df_rekap.iterrows():
+                    norm = normalize_phone(str(row.get(_rpc, "")))
+                    if norm and norm != "62":
+                        _rek_lkp[norm] = str(row.get(_rnk, "")).strip() if _rnk else ""
+
+        _sc_lkp = {}
+        if df_sc is not None:
+            _snk = find_col(df_sc, ["NOKONTRAK", col_nokontrak_sc])
+            _slp = find_col(df_sc, ["lastpaiddate", col_lastpaid])
+            _snm = find_col(df_sc, ["custname", col_custname])
+            if _snk:
+                for _, row in df_sc.iterrows():
+                    nok = str(row.get(_snk, "")).strip()
+                    if nok:
+                        lp = row.get(_slp) if _slp else None
+                        bayar = pd.notna(lp) and str(lp).strip() not in ["", "nan", "NaT", "None", "0"]
+                        _sc_lkp[nok] = {"bayar": bayar, "nama": str(row.get(_snm, "")) if _snm else ""}
+
+        def get_bayar_sc(phone_norm):
+            nok = _rek_lkp.get(phone_norm)
+            if not nok:
+                return None
+            sc = _sc_lkp.get(nok)
+            if sc is None:
+                return None
+            return sc["bayar"]
+
+        # ── Klasifikasi semua sesi ───────────────────────────
+        sess_all["_l1"]      = sess_all["_all_msgs"].apply(lvl1)
+        sess_all["_bayar_sc"]= sess_all["_phone_norm"].apply(get_bayar_sc)
+
+        def get_l2(row):
+            l1, msg, bayar = row["_l1"], row["_all_msgs"], row["_bayar_sc"]
+            if l1 == "Sudah Bayar":   return lvl2_sudah(msg, bayar)
+            if l1 == "Janji Bayar":   return lvl2_janji(msg, bayar)
+            if l1 == "Hubungi Kami":  return lvl2_hubungi(msg)
+            if l1 == "Broken Promise":return lvl2_broken(msg)
+            if l1 == "Wrong Number":  return "Wrong Number"
+            return "No Push"
+
+        sess_all["_l2"] = sess_all.apply(get_l2, axis=1)
+
+        # ── WARNA ────────────────────────────────────────────
+        L1_COLOR = {
+            "Sudah Bayar":    "#15803D",
+            "Janji Bayar":    "#1D4ED8",
+            "No Push":        "#475569",
+            "Hubungi Kami":   "#D97706",
+            "Broken Promise": "#B91C1C",
+            "Wrong Number":   "#0891B2",
+        }
+        L2_COLOR = {
+            "Beneran Bayar":        "#15803D",
+            "Real Promise":         "#15803D",
+            "Bayar":                "#15803D",
+            "Tidak Bayar":          "#B91C1C",
+            "Broken Promise":       "#B91C1C",
+            "Tidak Bisa Bayar":     "#B91C1C",
+            "Unknown":              "#475569",
+            "Unknown (tidak ada di SC)": "#475569",
+            "Minta Autodebet":      "#7C3AED",
+            "Minta Cara Bayar":     "#0891B2",
+            "Nego Denda":           "#D97706",
+            "Ke Kantor":            "#0F766E",
+            "Minta Cicil/Rubah JT": "#DB2777",
+            "Lainnya":              "#94A3B8",
+            "Wrong Number":         "#0891B2",
+            "No Push":              "#64748B",
+        }
+
+        # ── RENDER FUNNEL ────────────────────────────────────
+        l1_counts = sess_all["_l1"].value_counts()
+        L1_ORDER  = ["Sudah Bayar","Janji Bayar","No Push","Hubungi Kami","Broken Promise","Wrong Number"]
+
+        st.markdown(f"""
+        <div style="background:#1E3A5F;border-radius:8px;padding:10px 20px;margin-bottom:16px;
+                    display:flex;justify-content:space-between;align-items:center">
+          <span style="color:#fff;font-weight:700;font-size:15px">Funnel Response Nasabah</span>
+          <span style="color:rgba(255,255,255,.6);font-size:12px">Total sesi: <b style="color:#fff">{total_sesi:,}</b></span>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Filter L1
+        sel_l1 = st.selectbox(
+            "Pilih kategori untuk drill-down:",
+            ["Semua"] + L1_ORDER,
+            key="funnel_l1_sel"
+        )
+
+        # ── TAMPILAN BARIS FUNNEL ────────────────────────────
+        def node_html(label, count, total, color, is_selected=False):
+            pct_v = count / total * 100 if total else 0
+            border = "3px solid #fff" if is_selected else f"2px solid {color}"
+            shadow = "box-shadow:0 0 0 3px rgba(255,255,255,.3);" if is_selected else ""
+            return f"""
+            <div style="background:{color};border-radius:10px;padding:10px 14px;
+                        {border};{shadow}display:inline-block;min-width:160px;text-align:center">
+              <div style="color:#fff;font-size:12px;font-weight:600;margin-bottom:2px">{label}</div>
+              <div style="color:#fff;font-size:20px;font-weight:800">{count:,}</div>
+              <div style="color:rgba(255,255,255,.75);font-size:11px">({pct_v:.1f}%)</div>
+            </div>"""
+
+        # Row L1 — semua kategori
+        st.markdown('<p class="sh" style="margin-top:8px">Level 1 — Kategori Utama</p>', unsafe_allow_html=True)
+
+        cols_l1 = st.columns(len(L1_ORDER))
+        for i, kat in enumerate(L1_ORDER):
+            cnt = int(l1_counts.get(kat, 0))
+            is_sel = (sel_l1 == kat)
+            with cols_l1[i]:
+                st.markdown(node_html(kat, cnt, total_sesi, L1_COLOR.get(kat,"#475569"), is_sel), unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # ── DRILL DOWN L2 ─────────────────────────────────────
+        if sel_l1 != "Semua":
+            subset = sess_all[sess_all["_l1"] == sel_l1]
+            n_l1   = len(subset)
+            l2_counts = subset["_l2"].value_counts()
+
+            st.markdown(f'<p class="sh">Level 2 — Breakdown <span style="color:{L1_COLOR.get(sel_l1,"#475569")}">{sel_l1}</span> ({n_l1:,} sesi)</p>', unsafe_allow_html=True)
+
+            # Nodes L2
+            cols_l2 = st.columns(min(len(l2_counts), 4))
+            for i, (kat2, cnt2) in enumerate(l2_counts.items()):
+                col_idx = i % len(cols_l2)
+                with cols_l2[col_idx]:
+                    clr2 = L2_COLOR.get(kat2, "#64748B")
+                    st.markdown(node_html(kat2, cnt2, n_l1, clr2), unsafe_allow_html=True)
+
+            # Bar chart L2
+            st.markdown("<br>", unsafe_allow_html=True)
+            fig_l2 = go.Figure(go.Bar(
+                x=l2_counts.values.tolist(),
+                y=l2_counts.index.tolist(),
+                orientation="h",
+                marker_color=[L2_COLOR.get(k, "#64748B") for k in l2_counts.index],
+                text=[f"{v:,}  ({v/n_l1:.1%})" for v in l2_counts.values],
+                textposition="outside",
+                textfont=dict(size=12, color="#334155"),
+            ))
+            fig_l2.update_layout(
+                height=max(200, len(l2_counts) * 52),
+                margin=dict(l=0, r=120, t=10, b=0),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="#F8FAFC",
+                font=dict(family="Inter", color="#64748B"),
+                xaxis=dict(gridcolor="#E2E8F0", showticklabels=False),
+                yaxis=dict(gridcolor="rgba(0,0,0,0)"),
+            )
+            st.plotly_chart(fig_l2, use_container_width=True)
+
+            # Tabel detail sesi
+            st.markdown('<p class="sh">Detail Sesi</p>', unsafe_allow_html=True)
+            sel_l2 = st.selectbox(
+                "Filter breakdown:",
+                ["Semua"] + l2_counts.index.tolist(),
+                key="funnel_l2_sel"
+            )
+            show_df = subset if sel_l2 == "Semua" else subset[subset["_l2"] == sel_l2]
+            show_df = show_df[["_phone_norm","_l1","_l2","_all_msgs","_bayar_sc","_date"]].copy()
+            show_df.columns = ["No HP","Kategori L1","Kategori L2","Pesan","Bayar (SC)","Tgl Chat"]
+            show_df["Bayar (SC)"] = show_df["Bayar (SC)"].apply(
+                lambda x: "Bayar" if x is True else ("Belum" if x is False else "Unknown")
+            )
+            st.markdown(f'<p style="font-size:11px;color:#94A3B8;margin-bottom:6px">Menampilkan <b>{len(show_df):,}</b> sesi</p>', unsafe_allow_html=True)
+            st.dataframe(show_df, use_container_width=True, height=350)
+
+            # Download
+            def to_xlsx(d):
+                buf = BytesIO()
+                with pd.ExcelWriter(buf, engine="openpyxl") as w:
+                    d.to_excel(w, index=False)
+                return buf.getvalue()
+
+            st.download_button(
+                f"Download {sel_l1}{' - '+sel_l2 if sel_l2 != 'Semua' else ''} (.xlsx)",
+                to_xlsx(show_df),
+                f"funnel_{sel_l1.lower().replace(' ','_')}.xlsx",
+                "application/vnd.ms-excel"
+            )
+
+        else:
+            # Semua — tampilkan overview semua L2
+            st.markdown('<p class="sh">Overview semua breakdown</p>', unsafe_allow_html=True)
+            l2_all = sess_all.groupby(["_l1","_l2"]).size().reset_index(name="Jumlah")
+            l2_all = l2_all.sort_values(["_l1","Jumlah"], ascending=[True, False])
+
+            rows_html = ""
+            for _, row in l2_all.iterrows():
+                pv   = row["Jumlah"] / total_sesi if total_sesi else 0
+                c1   = L1_COLOR.get(row["_l1"], "#475569")
+                c2   = L2_COLOR.get(row["_l2"], "#64748B")
+                bar  = (f'<div style="background:#E2E8F0;border-radius:4px;height:8px;overflow:hidden">'
+                        f'<div style="width:{pv*100:.1f}%;height:100%;background:{c2};border-radius:4px"></div></div>')
+                rows_html += f"""<tr>
+                  <td class="left"><span style="font-weight:700;color:{c1}">{row['_l1']}</span></td>
+                  <td class="left"><span style="font-weight:600;color:{c2}">{row['_l2']}</span></td>
+                  <td style="font-weight:700">{int(row['Jumlah']):,}</td>
+                  <td><span class="pill b">{pv:.1%}</span></td>
+                  <td style="min-width:120px">{bar}</td>
+                </tr>"""
+
+            st.markdown(f"""<div style="max-height:500px;overflow-y:auto">
+            <table class="t"><thead><tr>
+              <th class="left">Kategori L1</th><th class="left">Breakdown L2</th>
+              <th>Jumlah</th><th>% dari total</th><th>Proporsi</th>
+            </tr></thead><tbody>{rows_html}</tbody></table></div>""", unsafe_allow_html=True)
+
+
+# ═══════════════════════════════════════════════════════════
+# TAB FUNNEL RESPONSE
+# ═══════════════════════════════════════════════════════════
+if conv is not None and "Funnel Response" in tab_idx:
+    with tab_objs[tab_idx["Funnel Response"]]:
+        import re as _re
+
+        # ── Data persiapan ──────────────────────────────────────
+        fr_df = conv[conv["_orig"] == "IN"].copy()
+        if sel_month != "Semua Bulan" and fr_df["_date"].notna().any():
+            fr_df = fr_df[fr_df["_date"].dt.strftime("%B %Y") == sel_month]
+
+        # Gabung semua pesan per sesi
+        sess_all = fr_df.groupby("_sess")["_msg"].apply(
+            lambda x: " ".join(x.dropna().astype(str))
+        ).reset_index()
+        sess_all.columns = ["_sess", "_all_msgs"]
+        sess_phone = fr_df.groupby("_sess")["_phone"].first().reset_index()
+        sess_all = sess_all.merge(sess_phone, on="_sess", how="left")
+        sess_all["_phone_norm"] = sess_all["_phone"].apply(normalize_phone)
+
+        total_resp = len(sess_all)
+
+        # ── Klasifikasi Level 1 ─────────────────────────────────
+        # Urutan prioritas: Sudah Bayar > Janji Bayar > Hubungi Kami > No Push > Lainnya
+        L1_RULES = [
+            ("Sudah Bayar",  [r"(sudah|udah)\s*(bayar|transfer|tf|lunas)", r"(sudah\s*lunas|lunas)", r"ukti"]),
+            ("Janji Bayar",  [r"(janji|akan|mau|siap|insya\s*allah|nanti)\s*(bayar|transfer|tf|lunasi)",
+                               r"(besok|lusa|senin|selasa|rabu|kamis|jumat|sabtu|minggu).*(bayar|transfer)",
+                               r"tanggal\s*\d+.*(bayar|transfer)"]),
+            ("Hubungi Kami", [r"(hubungi|kontak|telepon|wa\s*balik|call|cs|customer\s*service)",
+                               r"(minta\s*autodebet|autodebet|auto\s*debet)",
+                               r"(cara\s*bayar|mau\s*bayar|gimana\s*bayar|minta\s*rekening)",
+                               r"(nego|negosiasi|keringanan|diskon|restruktur|cicil)",
+                               r"(salah\s*nomor|bukan\s*saya|wrong\s*number)"]),
+            ("No Push",      [r"(tidak\s*bisa|gabisa|belum\s*bisa|blm\s*bisa|gak\s*bisa)",
+                               r"(stop|berhenti|jangan|hapus|unsubscribe|blokir)",
+                               r"(tidak\s*ada\s*uang|lagi\s*susah|belum\s*ada)"]),
+        ]
+
+        def classify_l1(msg):
+            m = msg.lower()
+            for label, pats in L1_RULES:
+                for p in pats:
+                    if _re.search(p, m):
+                        return label
+            return "Lainnya"
+
+        sess_all["_l1"] = sess_all["_all_msgs"].apply(classify_l1)
+
+        # ── Klasifikasi Level 2 ─────────────────────────────────
+        L2_RULES = {
+            "Sudah Bayar": [
+                ("Beneran Bayar",  None),   # diisi dari SC check
+                ("Tidak Terbukti", None),
+                ("Unknown",        None),
+            ],
+            "Janji Bayar": [
+                ("Real Promise",    [r"(besok|lusa|tanggal\s*\d+|tgl\s*\d+|senin|selasa|rabu|kamis|jumat|sabtu)",
+                                     r"(pasti|insya\s*allah|siap)"]),
+                ("Broken Promise",  None),  # diisi dari SC check (janji tapi tidak bayar)
+                ("Unknown",         None),  # tidak ada di SC
+            ],
+            "Hubungi Kami": [
+                ("Minta Autodebet", [r"(autodebet|auto\s*debet)"]),
+                ("Cara Bayar",      [r"(cara\s*bayar|gimana\s*bayar|minta\s*rekening|mau\s*bayar)"]),
+                ("Nego Denda",      [r"(nego|denda|keringanan|diskon|restruktur)"]),
+                ("Salah Nomor",     [r"(salah\s*nomor|bukan\s*saya|wrong\s*number)"]),
+                ("Lainnya",         None),
+            ],
+            "No Push": [
+                ("Tidak Bisa Bayar",[r"(tidak\s*bisa|gabisa|belum\s*bisa|blm\s*bisa|gak\s*bisa)"]),
+                ("Minta Stop",      [r"(stop|berhenti|jangan|hapus|unsubscribe|blokir)"]),
+                ("Belum Ada Dana",  [r"(tidak\s*ada\s*uang|lagi\s*susah|belum\s*ada)"]),
+                ("Lainnya",         None),
+            ],
+            "Lainnya": [
+                ("Lainnya", None),
+            ],
+        }
+
+        def classify_l2(msg, l1):
+            rules = L2_RULES.get(l1, [])
+            m = msg.lower()
+            for label, pats in rules:
+                if pats is None:
+                    continue
+                for p in pats:
+                    if _re.search(p, m):
+                        return label
+            return rules[-1][0] if rules else "Lainnya"
+
+        sess_all["_l2_raw"] = sess_all.apply(
+            lambda r: classify_l2(r["_all_msgs"], r["_l1"]), axis=1
+        )
+
+        # ── Cross-check SC untuk Sudah Bayar & Janji Bayar ──────
+        # Rebuild lookup dari paid_lookup yang sudah ada di tab Realisasi
+        # Gunakan rek_lookup + sc_lookup kalau ada
+        def get_bayar_status(phone_norm):
+            if not has_realisasi:
+                return None
+            rek = rek_lookup.get(phone_norm) if "rek_lookup" in dir() else None
+            if not rek:
+                return None
+            nok = rek.get("nokontrak","")
+            sc  = sc_lookup.get(nok) if nok and "sc_lookup" in dir() else None
+            if sc:
+                return sc["bayar_sc"]
+            return None
+
+        sess_all["_bayar_sc"] = sess_all["_phone_norm"].apply(get_bayar_status)
+
+        # Finalize L2 untuk Sudah Bayar & Janji Bayar pakai SC
+        def finalize_l2(row):
+            l1  = row["_l1"]
+            l2r = row["_l2_raw"]
+            bs  = row["_bayar_sc"]
+
+            if l1 == "Sudah Bayar":
+                if bs is True:  return "Beneran Bayar"
+                if bs is False: return "Tidak Terbukti"
+                return "Unknown"
+
+            if l1 == "Janji Bayar":
+                if bs is True:  return "Real Promise"
+                if bs is False: return "Broken Promise"
+                return "Unknown"
+
+            return l2r
+
+        sess_all["_l2"] = sess_all.apply(finalize_l2, axis=1)
+
+        # ── Hitung untuk visualisasi ────────────────────────────
+        L1_CONFIG = {
+            "Sudah Bayar":  {"fg":"#15803D","bg":"#DCFCE7","bd":"#86EFAC"},
+            "Janji Bayar":  {"fg":"#1D4ED8","bg":"#EFF6FF","bd":"#93C5FD"},
+            "No Push":      {"fg":"#B91C1C","bg":"#FEE2E2","bd":"#FECACA"},
+            "Hubungi Kami": {"fg":"#D97706","bg":"#FFFBEB","bd":"#FDE68A"},
+            "Lainnya":      {"fg":"#475569","bg":"#F1F5F9","bd":"#CBD5E1"},
+        }
+        L2_COLORS = {
+            "Beneran Bayar":"#15803D","Real Promise":"#15803D",
+            "Tidak Terbukti":"#B91C1C","Broken Promise":"#B91C1C",
+            "Unknown":"#475569",
+            "Minta Autodebet":"#0891B2","Cara Bayar":"#1D4ED8",
+            "Nego Denda":"#7C3AED","Salah Nomor":"#94A3B8",
+            "Tidak Bisa Bayar":"#DC2626","Minta Stop":"#B91C1C",
+            "Belum Ada Dana":"#EF4444","Lainnya":"#64748B",
+        }
+
+        # ── Filter L1 ───────────────────────────────────────────
+        st.markdown('<p class="sh">Filter Kategori</p>', unsafe_allow_html=True)
+
+        l1_counts = sess_all["_l1"].value_counts()
+        l1_order  = [k for k in ["Sudah Bayar","Janji Bayar","No Push","Hubungi Kami","Lainnya"] if k in l1_counts]
+
+        # Tombol filter L1
+        btn_cols = st.columns(len(l1_order) + 1)
+        if "fr_sel_l1" not in st.session_state:
+            st.session_state["fr_sel_l1"] = "Semua"
+
+        with btn_cols[0]:
+            if st.button("Semua", key="fr_all",
+                         type="primary" if st.session_state["fr_sel_l1"] == "Semua" else "secondary",
+                         use_container_width=True):
+                st.session_state["fr_sel_l1"] = "Semua"
+                st.rerun()
+
+        for i, l1 in enumerate(l1_order):
+            cfg = L1_CONFIG.get(l1, L1_CONFIG["Lainnya"])
+            cnt = int(l1_counts.get(l1, 0))
+            with btn_cols[i+1]:
+                if st.button(f"{l1} ({cnt:,})", key=f"fr_{l1}",
+                             type="primary" if st.session_state["fr_sel_l1"] == l1 else "secondary",
+                             use_container_width=True):
+                    st.session_state["fr_sel_l1"] = l1
+                    st.rerun()
+
+        sel_l1 = st.session_state["fr_sel_l1"]
+        filtered = sess_all if sel_l1 == "Semua" else sess_all[sess_all["_l1"] == sel_l1]
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # ── Summary cards L1 ────────────────────────────────────
+        st.markdown('<p class="sh">Breakdown Level 1</p>', unsafe_allow_html=True)
+        card_cols = st.columns(len(l1_order))
+        for i, l1 in enumerate(l1_order):
+            cfg = L1_CONFIG.get(l1, L1_CONFIG["Lainnya"])
+            cnt = int(l1_counts.get(l1, 0))
+            pv  = cnt / total_resp if total_resp else 0
+            with card_cols[i]:
+                border_sty = f"border:2px solid {cfg['bd']}" if sel_l1 == l1 else f"border:1.5px solid {cfg['bd']}"
+                st.markdown(f"""<div class="mbox" style="background:{cfg['bg']};{border_sty};color:{cfg['fg']}">
+                  <div class="mbox-lbl">{l1}</div>
+                  <div class="mbox-val">{cnt:,}</div>
+                  <div class="mbox-pct">{pv:.1%} dari {total_resp:,}</div>
+                </div>""", unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # ── Breakdown L2 ─────────────────────────────────────────
+        st.markdown(f'<p class="sh">Breakdown Level 2{"  —  " + sel_l1 if sel_l1 != "Semua" else " (Semua Kategori)"}</p>', unsafe_allow_html=True)
+
+        if sel_l1 == "Semua":
+            # Tampilkan semua L2 per L1 dalam grid
+            for l1 in l1_order:
+                cfg   = L1_CONFIG.get(l1, L1_CONFIG["Lainnya"])
+                grp   = sess_all[sess_all["_l1"] == l1]
+                l2cnt = grp["_l2"].value_counts()
+                total_l1 = len(grp)
+                if total_l1 == 0:
+                    continue
+
+                bars = ""
+                for label, cnt in l2cnt.items():
+                    pv  = cnt / total_l1
+                    clr = L2_COLORS.get(label, "#64748B")
+                    bars += f"""<div class="brow">
+                      <div class="blbl">{label}</div>
+                      <div class="btrk">
+                        <div class="bfil" style="width:{pv*100:.1f}%;background:{clr}">
+                          <span class="bnum">{cnt:,}</span>
+                        </div>
+                      </div>
+                      <div class="bpct">{pv:.1%}</div>
+                    </div>"""
+
+                st.markdown(f"""<div class="card" style="border-left:3px solid {cfg['bd']}">
+                  <p style="font-size:12px;font-weight:700;color:{cfg['fg']};margin:0 0 10px">{l1}
+                    <span style="font-size:11px;font-weight:400;color:#94A3B8;margin-left:8px">{total_l1:,} sesi</span>
+                  </p>
+                  {bars}
+                </div>""", unsafe_allow_html=True)
+
+        else:
+            # Tampilkan L2 untuk L1 yang dipilih + tabel detail
+            grp   = sess_all[sess_all["_l1"] == sel_l1]
+            l2cnt = grp["_l2"].value_counts()
+            total_l1 = len(grp)
+
+            col_chart, col_tbl = st.columns([2, 3])
+
+            with col_chart:
+                bars = ""
+                for label, cnt in l2cnt.items():
+                    pv  = cnt / total_l1 if total_l1 else 0
+                    clr = L2_COLORS.get(label, "#64748B")
+                    bars += f"""<div class="brow">
+                      <div class="blbl">{label}</div>
+                      <div class="btrk">
+                        <div class="bfil" style="width:{pv*100:.1f}%;background:{clr}">
+                          <span class="bnum">{cnt:,}</span>
+                        </div>
+                      </div>
+                      <div class="bpct">{pv:.1%}</div>
+                    </div>"""
+                cfg = L1_CONFIG.get(sel_l1, L1_CONFIG["Lainnya"])
+                st.markdown(f"""<div class="card" style="border-left:3px solid {cfg['bd']}">
+                  <p style="font-size:11px;color:#94A3B8;margin:0 0 12px">Total <b>{total_l1:,}</b> sesi kategori {sel_l1}</p>
+                  {bars}
+                </div>""", unsafe_allow_html=True)
+
+            with col_tbl:
+                # Filter L2
+                l2_options = ["Semua"] + list(l2cnt.index)
+                sel_l2 = st.selectbox("Filter sub-kategori:", l2_options, key="fr_sel_l2")
+
+                tbl = grp if sel_l2 == "Semua" else grp[grp["_l2"] == sel_l2]
+
+                st.markdown(f'<p style="font-size:11px;color:#94A3B8;margin:4px 0 8px">Menampilkan <b>{len(tbl):,}</b> sesi</p>', unsafe_allow_html=True)
+
+                # Build table rows
+                tbl_rows = ""
+                for _, row in tbl.head(100).iterrows():
+                    msg_preview = str(row["_all_msgs"])[:60] + ("..." if len(str(row["_all_msgs"])) > 60 else "")
+                    clr2 = L2_COLORS.get(row["_l2"], "#64748B")
+                    bayar_lbl = ""
+                    if row["_bayar_sc"] is True:
+                        bayar_lbl = '<span class="pill g">Bayar</span>'
+                    elif row["_bayar_sc"] is False:
+                        bayar_lbl = '<span class="pill r">Belum</span>'
+                    else:
+                        bayar_lbl = '<span class="pill s">N/A</span>'
+
+                    tbl_rows += f"""<tr>
+                      <td style="color:#64748B;font-size:10px">{str(row.get("_phone",""))[-4:]}</td>
+                      <td class="left" style="font-size:11px">{msg_preview}</td>
+                      <td><span class="pill" style="background:{clr2}22;color:{clr2}">{row["_l2"]}</span></td>
+                      <td>{bayar_lbl}</td>
+                    </tr>"""
+
+                st.markdown(f"""<div style="max-height:400px;overflow-y:auto">
+                <table class="t"><thead><tr>
+                  <th>No HP</th><th class="left">Pesan</th><th>Sub-kategori</th><th>Status Bayar</th>
+                </tr></thead><tbody>{tbl_rows}</tbody></table></div>
+                {"" if len(tbl) <= 100 else f'<p style="font-size:10px;color:#94A3B8;margin-top:4px">Menampilkan 100 dari {len(tbl):,} baris.</p>'}
+                """, unsafe_allow_html=True)
+
+                # Download
+                dl_df = tbl[["_phone_norm","_l1","_l2","_all_msgs","_bayar_sc"]].copy()
+                dl_df.columns = ["No HP","Kategori","Sub-kategori","Pesan","Bayar SC"]
+                buf = BytesIO()
+                with pd.ExcelWriter(buf, engine="openpyxl") as w:
+                    dl_df.to_excel(w, index=False)
+                st.download_button(
+                    "Download data ini (.xlsx)",
+                    buf.getvalue(),
+                    f"funnel_{sel_l1}_{sel_l2}.xlsx",
+                    "application/vnd.ms-excel",
+                    key="dl_funnel"
+                )
 
 
 # ═══════════════════════════════════════════════════════════
