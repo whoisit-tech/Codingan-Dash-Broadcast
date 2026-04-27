@@ -252,31 +252,43 @@ def build_summary_from_rekap(raw):
     df = pd.read_excel(io.BytesIO(raw))
     df.columns = [str(c).strip() for c in df.columns]
 
-    # --- Kolom tanggal: coba send_now dulu, lalu date, lalu kolom lain ---
-    date_col = next(
-        (c for c in df.columns if c.lower() in ["send_now", "date", "tanggal", "created_at"]),
-        None
-    )
-    # Fallback: cari kolom yang mengandung kata "date" atau "tgl"
-    if date_col is None:
-        date_col = next(
-            (c for c in df.columns if "date" in c.lower() or "tgl" in c.lower()),
-            df.columns[0]
-        )
-    # Coba beberapa format tanggal
-    parsed = None
-    for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%d/%m/%Y %H:%M:%S", "%d/%m/%Y", "%d-%m-%Y"]:
-        try:
-            parsed = pd.to_datetime(df[date_col], format=fmt, errors="coerce")
-            if parsed.notna().sum() > 0:
-                break
-        except Exception:
-            pass
-    if parsed is None or parsed.notna().sum() == 0:
-        parsed = pd.to_datetime(df[date_col], dayfirst=True, errors="coerce")
-    df["_date"] = parsed
-    df["_day"]  = df["_date"].dt.normalize()
+    # --- Bangun kolom tanggal ---
+    # Cek apakah ada kolom year/month/day terpisah (format Rekap WAI)
+    has_ymd = all(c in [col.lower() for col in df.columns] for c in ["year", "month", "day"])
 
+    if has_ymd:
+        # Normalisasi nama kolom ke lowercase mapping
+        col_map = {col.lower(): col for col in df.columns}
+        yr  = pd.to_numeric(df[col_map["year"]],   errors="coerce")
+        mo  = pd.to_numeric(df[col_map["month"]],  errors="coerce")
+        dy  = pd.to_numeric(df[col_map["day"]],    errors="coerce")
+        hr  = pd.to_numeric(df[col_map.get("hour",   "")], errors="coerce").fillna(0) if "hour"   in col_map else 0
+        mi  = pd.to_numeric(df[col_map.get("minute", "")], errors="coerce").fillna(0) if "minute" in col_map else 0
+        df["_date"] = pd.to_datetime(dict(year=yr, month=mo, day=dy, hour=hr, minute=mi), errors="coerce")
+    else:
+        # Cari kolom tanggal tunggal
+        date_col = next(
+            (c for c in df.columns if c.lower() in ["send_now", "date", "tanggal", "created_at"]),
+            None
+        )
+        if date_col is None:
+            date_col = next(
+                (c for c in df.columns if "date" in c.lower() or "tgl" in c.lower()),
+                df.columns[0]
+            )
+        parsed = None
+        for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%d/%m/%Y %H:%M:%S", "%d/%m/%Y", "%d-%m-%Y"]:
+            try:
+                parsed = pd.to_datetime(df[date_col], format=fmt, errors="coerce")
+                if parsed.notna().sum() > 0:
+                    break
+            except Exception:
+                pass
+        if parsed is None or parsed.notna().sum() == 0:
+            parsed = pd.to_datetime(df[date_col], dayfirst=True, errors="coerce")
+        df["_date"] = parsed
+
+    df["_day"] = df["_date"].dt.normalize()
     # Buang baris yang tanggalnya tidak terbaca
     df = df[df["_date"].notna()].copy()
 
