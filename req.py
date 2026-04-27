@@ -255,10 +255,30 @@ def build_summary_from_rekap(raw):
     # --- Kolom tanggal: coba send_now dulu, lalu date, lalu kolom lain ---
     date_col = next(
         (c for c in df.columns if c.lower() in ["send_now", "date", "tanggal", "created_at"]),
-        df.columns[0]
+        None
     )
-    df["_date"] = pd.to_datetime(df[date_col], dayfirst=True, errors="coerce")
+    # Fallback: cari kolom yang mengandung kata "date" atau "tgl"
+    if date_col is None:
+        date_col = next(
+            (c for c in df.columns if "date" in c.lower() or "tgl" in c.lower()),
+            df.columns[0]
+        )
+    # Coba beberapa format tanggal
+    parsed = None
+    for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%d/%m/%Y %H:%M:%S", "%d/%m/%Y", "%d-%m-%Y"]:
+        try:
+            parsed = pd.to_datetime(df[date_col], format=fmt, errors="coerce")
+            if parsed.notna().sum() > 0:
+                break
+        except Exception:
+            pass
+    if parsed is None or parsed.notna().sum() == 0:
+        parsed = pd.to_datetime(df[date_col], dayfirst=True, errors="coerce")
+    df["_date"] = parsed
     df["_day"]  = df["_date"].dt.normalize()
+
+    # Buang baris yang tanggalnya tidak terbaca
+    df = df[df["_date"].notna()].copy()
 
     # --- Kolom status: pakai 'status' utama ---
     status_col = next((c for c in df.columns if c.lower() == "status"), None)
@@ -405,7 +425,13 @@ _rekap_raw = f_rekap.read()
 df_rekap   = load_rekap(_rekap_raw)
 df         = build_summary_from_rekap(_rekap_raw)   # summary dibangun dari Rekap WAI
 
-# Tampilkan nilai unik kolom status di sidebar (untuk debug)
+# Tampilkan debug info di sidebar
+if df.empty or df["Date"].isna().all():
+    with st.sidebar:
+        st.markdown("---")
+        st.error("Tanggal tidak terbaca dari Rekap WAI.")
+        st.markdown(f'<p style="font-size:10px;color:#F87171">Kolom yang dicoba: <b>send_now, date</b><br>Kolom tersedia: {", ".join(df_rekap.columns[:10].tolist())}</p>', unsafe_allow_html=True)
+
 if "status_values" in df.attrs:
     with st.sidebar:
         st.markdown("---")
@@ -456,7 +482,11 @@ def pct(a, b): return f"{a/b:.1%}" if b else "0%"
 # ═══════════════════════════════════════════════════════════
 # PERIOD HEADER
 # ═══════════════════════════════════════════════════════════
-period = f"{dff['Date'].min().strftime('%d %b %Y')} - {dff['Date'].max().strftime('%d %b %Y')}"
+try:
+    period = f"{dff['Date'].min().strftime('%d %b %Y')} - {dff['Date'].max().strftime('%d %b %Y')}"
+except Exception:
+    period = "Periode tidak terdeteksi"
+    st.warning("Kolom tanggal di Rekap WAI tidak terbaca. Cek nama kolom di sidebar (send_now / date).")
 st.markdown(f"""
 <div style="background:#1E3A5F;border-radius:10px;padding:16px 24px;margin-bottom:18px;
             display:flex;justify-content:space-between;align-items:center">
