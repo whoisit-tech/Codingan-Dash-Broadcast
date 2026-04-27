@@ -146,29 +146,23 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
 
-    f_sum = st.file_uploader(
-        "1. Summary Broadcast",
-        type=["xlsx", "xls"],
-        help="Kolom: DateUploaded, Sent, Delivered, Read, Failed, Total"
-    )
     f_conv = st.file_uploader(
-        "2. Conversation / Response WA",
+        "1. Conversation / Response WA",
         type=["xlsx", "xls"],
         help="Kolom: Origin, Message Type, Message, Session, Created At"
     )
     f_sc = st.file_uploader(
-        "3. File SC Jan-Mar",
+        "2. File SC Jan-Mar",
         type=["xlsx", "xls"],
         help="Sheet: Sc Januari, Sc Februari, Sc Maret"
     )
     f_rekap = st.file_uploader(
-        "4. Rekap WAI 4W",
+        "3. Rekap WAI 4W",
         type=["xlsx", "xls"],
-        help="Kolom No WA dan Tgl Bayar"
+        help="Kolom: no_wa, status, send_now, body_param_2"
     )
 
     files_status = {
-        "Summary": f_sum is not None,
         "Conversation": f_conv is not None,
         "SC": f_sc is not None,
         "Rekap WAI": f_rekap is not None,
@@ -213,25 +207,23 @@ with st.sidebar:
     kw_hubungi = st.text_input("Hubungi Kami", value="hubungi,kontak,cs,call center", key="kw_h")
     kw_nopush  = st.text_input("No Push", value="tidak bisa,belum bisa,jangan,stop,unsubscribe", key="kw_n")
 
-has_broadcast = f_sum is not None
 has_conv      = f_conv is not None
 has_sc        = f_sc is not None
 has_rekap     = f_rekap is not None
 has_realisasi = has_conv and (has_sc or has_rekap)
 
-if not has_broadcast:
+if not has_rekap:
     st.markdown("""
     <div style="background:#fff;border:1px solid #E2E8F0;border-radius:12px;padding:48px 32px;text-align:center;margin-top:24px">
       <div style="font-size:16px;font-weight:700;color:#1E293B;margin-bottom:6px">Upload File untuk Memulai</div>
       <div style="font-size:13px;color:#64748B;max-width:440px;margin:0 auto">
-        Upload file via panel kiri. Minimal <b>Summary Broadcast</b> untuk melihat data broadcast.
+        Upload file via panel kiri. Minimal <b>Rekap WAI 4W</b> untuk melihat data broadcast.
         Tambahkan file lainnya untuk fitur realisasi bayar.
       </div>
       <div style="margin-top:20px;display:flex;justify-content:center;gap:8px;flex-wrap:wrap">
-        <span style="background:#EFF6FF;color:#1D4ED8;border-radius:20px;padding:4px 12px;font-size:11px;font-weight:600">1. Summary Broadcast</span>
-        <span style="background:#F0FDF4;color:#15803D;border-radius:20px;padding:4px 12px;font-size:11px;font-weight:600">2. Conversation WA</span>
-        <span style="background:#FFFBEB;color:#B45309;border-radius:20px;padding:4px 12px;font-size:11px;font-weight:600">3. File SC</span>
-        <span style="background:#F3E8FF;color:#7C3AED;border-radius:20px;padding:4px 12px;font-size:11px;font-weight:600">4. Rekap WAI</span>
+        <span style="background:#F0FDF4;color:#15803D;border-radius:20px;padding:4px 12px;font-size:11px;font-weight:600">1. Conversation WA</span>
+        <span style="background:#FFFBEB;color:#B45309;border-radius:20px;padding:4px 12px;font-size:11px;font-weight:600">2. File SC</span>
+        <span style="background:#EFF6FF;color:#1D4ED8;border-radius:20px;padding:4px 12px;font-size:11px;font-weight:600">3. Rekap WAI (wajib)</span>
       </div>
     </div>
     """, unsafe_allow_html=True)
@@ -242,25 +234,75 @@ if not has_broadcast:
 # LOAD & PARSE FUNCTIONS
 # ═══════════════════════════════════════════════════════════
 @st.cache_data
-def load_summary(raw):
+def build_summary_from_rekap(raw):
+    """Bangun tabel summary broadcast dari Rekap WAI.
+    Kolom Rekap: no_wa, send_now, date, status, cek, body_param_x, dll.
+
+    Kolom status yang dipakai:
+      - 'status' : nilai mentah dari API WA (sent, delivered, read, failed, dll)
+      - 'cek'    : kolom tambahan opsional (isi bebas)
+
+    Total     = semua baris per tanggal
+    Sent      = status in [sent, delivered, read]
+    Delivered = status in [delivered, read]
+    Read      = status == read
+    Failed    = status in [failed, undelivered, error, message undelivered,
+                           something went wrong, user's number is part of an experiment]
+    """
     df = pd.read_excel(io.BytesIO(raw))
-    df.columns = [c.strip() for c in df.columns]
-    dcol = next((c for c in df.columns if "date" in c.lower()), df.columns[0])
-    for fmt in ["%d/%m/%Y %H:%M", "%d/%m/%Y", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"]:
-        try:
-            df["Date"] = pd.to_datetime(df[dcol].astype(str).str.split().str[0], format=fmt.split()[0])
-            break
-        except Exception:
-            pass
-    if "Date" not in df.columns:
-        df["Date"] = pd.to_datetime(df[dcol], dayfirst=True, errors="coerce")
-    for c in ["Sent", "Delivered", "Read", "Failed", "Canceled", "Total"]:
-        df[c] = pd.to_numeric(df.get(c, 0), errors="coerce").fillna(0).astype(int)
-    df["Undelivered"] = (df["Sent"] - df["Delivered"]).clip(0)
-    df["Unread"]      = (df["Delivered"] - df["Read"]).clip(0)
-    df["Month"]       = df["Date"].dt.strftime("%B %Y")
-    df["MonthSort"]   = df["Date"].dt.year * 100 + df["Date"].dt.month
-    return df.sort_values("Date").reset_index(drop=True)
+    df.columns = [str(c).strip() for c in df.columns]
+
+    # --- Kolom tanggal: coba send_now dulu, lalu date, lalu kolom lain ---
+    date_col = next(
+        (c for c in df.columns if c.lower() in ["send_now", "date", "tanggal", "created_at"]),
+        df.columns[0]
+    )
+    df["_date"] = pd.to_datetime(df[date_col], dayfirst=True, errors="coerce")
+    df["_day"]  = df["_date"].dt.normalize()
+
+    # --- Kolom status: pakai 'status' utama ---
+    status_col = next((c for c in df.columns if c.lower() == "status"), None)
+
+    agg = df.groupby("_day").size().rename("Total").reset_index()
+    agg.columns = ["Date", "Total"]
+
+    if status_col:
+        stat = df[status_col].astype(str).str.strip().str.lower()
+
+        # nilai yang dianggap FAILED (semua pesan error dari WA API)
+        failed_vals = [
+            "failed", "undelivered", "error",
+            "message undelivered",          # kolom status di data kamu
+            "something went wrong",
+            "user's number is part of an experiment",
+            "user s number is part of an experiment",
+        ]
+        df["_failed"]    = stat.apply(lambda x: any(f in x for f in failed_vals)).astype(int)
+        df["_sent"]      = (~stat.apply(lambda x: any(f in x for f in failed_vals))).astype(int)
+        df["_delivered"] = stat.isin(["delivered", "read"]).astype(int)
+        df["_read"]      = stat.isin(["read"]).astype(int)
+
+        agg2 = df.groupby("_day")[["_sent","_delivered","_read","_failed"]].sum().reset_index()
+        agg2.columns = ["Date", "Sent", "Delivered", "Read", "Failed"]
+        agg = agg.merge(agg2, on="Date", how="left")
+
+        # Tampilkan breakdown nilai unik status di sidebar info (debug helper)
+        agg.attrs["status_values"] = df[status_col].value_counts().to_dict()
+    else:
+        # Tidak ada kolom status — semua dianggap sent
+        agg["Sent"]      = agg["Total"]
+        agg["Delivered"] = 0
+        agg["Read"]      = 0
+        agg["Failed"]    = 0
+
+    for c in ["Sent", "Delivered", "Read", "Failed"]:
+        agg[c] = agg[c].fillna(0).astype(int)
+
+    agg["Undelivered"] = (agg["Sent"] - agg["Delivered"]).clip(0)
+    agg["Unread"]      = (agg["Delivered"] - agg["Read"]).clip(0)
+    agg["Month"]       = agg["Date"].dt.strftime("%B %Y")
+    agg["MonthSort"]   = agg["Date"].dt.year * 100 + agg["Date"].dt.month
+    return agg.sort_values("Date").reset_index(drop=True)
 
 
 @st.cache_data
@@ -357,7 +399,23 @@ def classify_response(msg, kw_janji, kw_sudah, kw_hubungi, kw_nopush):
 # ═══════════════════════════════════════════════════════════
 # LOAD DATA
 # ═══════════════════════════════════════════════════════════
-df = load_summary(f_sum.read())
+_rekap_raw = f_rekap.read()
+df_rekap   = load_rekap(_rekap_raw)
+df         = build_summary_from_rekap(_rekap_raw)   # summary dibangun dari Rekap WAI
+
+# Tampilkan nilai unik kolom status di sidebar (untuk debug)
+if "status_values" in df.attrs:
+    with st.sidebar:
+        st.markdown("---")
+        st.markdown('<p style="font-size:11px;font-weight:600;color:#94A3B8;margin-bottom:4px">NILAI KOLOM STATUS DI REKAP</p>', unsafe_allow_html=True)
+        sv = df.attrs["status_values"]
+        rows = "".join([
+            f'<tr><td style="font-size:10px;color:#CBD5E1;padding:2px 4px">{k}</td>'
+            f'<td style="font-size:10px;color:#94A3B8;padding:2px 4px;text-align:right">{v:,}</td></tr>'
+            for k, v in sorted(sv.items(), key=lambda x: -x[1])
+        ])
+        st.markdown(f'<table style="width:100%">{rows}</table>', unsafe_allow_html=True)
+        st.caption("Cek apakah nilai status sudah terbaca dengan benar di funnel atas.")
 
 conv, phone_col_detected = None, None
 if has_conv:
@@ -369,10 +427,6 @@ if has_conv:
 df_sc = None
 if has_sc:
     df_sc = load_sc(f_sc.read())
-
-df_rekap = None
-if has_rekap:
-    df_rekap = load_rekap(f_rekap.read())
 
 
 # ═══════════════════════════════════════════════════════════
