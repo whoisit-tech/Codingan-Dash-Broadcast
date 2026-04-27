@@ -269,25 +269,27 @@ def build_summary_from_rekap(raw):
     if status_col:
         stat = df[status_col].astype(str).str.strip().str.lower()
 
-        # nilai yang dianggap FAILED (semua pesan error dari WA API)
-        failed_vals = [
-            "failed", "undelivered", "error",
-            "message undelivered",          # kolom status di data kamu
-            "something went wrong",
-            "user's number is part of an experiment",
-            "user s number is part of an experiment",
-        ]
-        df["_failed"]    = stat.apply(lambda x: any(f in x for f in failed_vals)).astype(int)
-        df["_sent"]      = (~stat.apply(lambda x: any(f in x for f in failed_vals))).astype(int)
-        df["_delivered"] = stat.isin(["delivered", "read"]).astype(int)
-        df["_read"]      = stat.isin(["read"]).astype(int)
+        # Buang baris dengan status N/A sebelum hitung apapun
+        valid_mask = ~stat.isin(["n/a", "na", "nan", "none", "-", ""])
+        df_valid   = df[valid_mask].copy()
+        stat_valid = stat[valid_mask]
 
-        agg2 = df.groupby("_day")[["_sent","_delivered","_read","_failed"]].sum().reset_index()
+        # Hitung Total hanya dari baris valid
+        agg = df_valid.groupby("_day").size().rename("Total").reset_index()
+        agg.columns = ["Date", "Total"]
+
+        df_valid["_failed"]    = stat_valid.isin(["failed"]).astype(int)
+        df_valid["_sent"]      = stat_valid.isin(["sent", "delivered", "read"]).astype(int)
+        df_valid["_delivered"] = stat_valid.isin(["delivered", "read"]).astype(int)
+        df_valid["_read"]      = stat_valid.isin(["read"]).astype(int)
+
+        agg2 = df_valid.groupby("_day")[["_sent","_delivered","_read","_failed"]].sum().reset_index()
         agg2.columns = ["Date", "Sent", "Delivered", "Read", "Failed"]
         agg = agg.merge(agg2, on="Date", how="left")
 
-        # Tampilkan breakdown nilai unik status di sidebar info (debug helper)
-        agg.attrs["status_values"] = df[status_col].value_counts().to_dict()
+        # Debug: simpan nilai unik status (termasuk N/A) untuk ditampilkan di sidebar
+        agg.attrs["status_values"] = df[status_col].value_counts(dropna=False).to_dict()
+        agg.attrs["na_dropped"]    = int((~valid_mask).sum())
     else:
         # Tidak ada kolom status — semua dianggap sent
         agg["Sent"]      = agg["Total"]
@@ -415,6 +417,9 @@ if "status_values" in df.attrs:
             for k, v in sorted(sv.items(), key=lambda x: -x[1])
         ])
         st.markdown(f'<table style="width:100%">{rows}</table>', unsafe_allow_html=True)
+        na_dropped = df.attrs.get("na_dropped", 0)
+        if na_dropped:
+            st.markdown(f'<p style="font-size:10px;color:#F59E0B;margin-top:4px">N/A dibuang: <b>{na_dropped:,}</b> baris tidak dihitung.</p>', unsafe_allow_html=True)
         st.caption("Cek apakah nilai status sudah terbaca dengan benar di funnel atas.")
 
 conv, phone_col_detected = None, None
