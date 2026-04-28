@@ -146,23 +146,29 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
 
+    f_sum = st.file_uploader(
+        "1. Summary Broadcast",
+        type=["xlsx", "xls"],
+        help="Kolom: DateUploaded, Sent, Delivered, Read, Failed, Total"
+    )
     f_conv = st.file_uploader(
-        "1. Conversation / Response WA",
+        "2. Conversation / Response WA",
         type=["xlsx", "xls"],
         help="Kolom: Origin, Message Type, Message, Session, Created At"
     )
     f_sc = st.file_uploader(
-        "2. File SC Jan-Mar",
+        "3. File SC (Feb-Mar)",
         type=["xlsx", "xls"],
-        help="Sheet: Sc Januari, Sc Februari, Sc Maret"
+        help="Sheet: Sc Februari, Sc Maret"
     )
     f_rekap = st.file_uploader(
-        "3. Rekap WAI 4W",
+        "4. Rekap WAI 4W",
         type=["xlsx", "xls"],
-        help="Kolom: no_wa, status, send_now, body_param_2"
+        help="Kolom: no_wa, status, year, month, day, body_param_2"
     )
 
     files_status = {
+        "Summary": f_sum is not None,
         "Conversation": f_conv is not None,
         "SC": f_sc is not None,
         "Rekap WAI": f_rekap is not None,
@@ -207,23 +213,25 @@ with st.sidebar:
     kw_hubungi = st.text_input("Hubungi Kami", value="hubungi,kontak,cs,call center", key="kw_h")
     kw_nopush  = st.text_input("No Push", value="tidak bisa,belum bisa,jangan,stop,unsubscribe", key="kw_n")
 
+has_sum       = f_sum is not None
 has_conv      = f_conv is not None
 has_sc        = f_sc is not None
 has_rekap     = f_rekap is not None
 has_realisasi = has_conv and (has_sc or has_rekap)
 
-if not has_rekap:
+if not has_sum:
     st.markdown("""
     <div style="background:#fff;border:1px solid #E2E8F0;border-radius:12px;padding:48px 32px;text-align:center;margin-top:24px">
       <div style="font-size:16px;font-weight:700;color:#1E293B;margin-bottom:6px">Upload File untuk Memulai</div>
       <div style="font-size:13px;color:#64748B;max-width:440px;margin:0 auto">
-        Upload file via panel kiri. Minimal <b>Rekap WAI 4W</b> untuk melihat data broadcast.
+        Upload file via panel kiri. Minimal <b>Summary Broadcast</b> untuk melihat data broadcast.
         Tambahkan file lainnya untuk fitur realisasi bayar.
       </div>
       <div style="margin-top:20px;display:flex;justify-content:center;gap:8px;flex-wrap:wrap">
-        <span style="background:#F0FDF4;color:#15803D;border-radius:20px;padding:4px 12px;font-size:11px;font-weight:600">1. Conversation WA</span>
-        <span style="background:#FFFBEB;color:#B45309;border-radius:20px;padding:4px 12px;font-size:11px;font-weight:600">2. File SC</span>
-        <span style="background:#EFF6FF;color:#1D4ED8;border-radius:20px;padding:4px 12px;font-size:11px;font-weight:600">3. Rekap WAI (wajib)</span>
+        <span style="background:#DBEAFE;color:#1D4ED8;border-radius:20px;padding:4px 12px;font-size:11px;font-weight:600">1. Summary Broadcast (wajib)</span>
+        <span style="background:#F0FDF4;color:#15803D;border-radius:20px;padding:4px 12px;font-size:11px;font-weight:600">2. Conversation WA</span>
+        <span style="background:#FFFBEB;color:#B45309;border-radius:20px;padding:4px 12px;font-size:11px;font-weight:600">3. File SC</span>
+        <span style="background:#F3E8FF;color:#7C3AED;border-radius:20px;padding:4px 12px;font-size:11px;font-weight:600">4. Rekap WAI</span>
       </div>
     </div>
     """, unsafe_allow_html=True)
@@ -233,6 +241,21 @@ if not has_rekap:
 # ═══════════════════════════════════════════════════════════
 # LOAD & PARSE FUNCTIONS
 # ═══════════════════════════════════════════════════════════
+@st.cache_data
+def load_summary(raw):
+    df = pd.read_excel(io.BytesIO(raw))
+    df.columns = [c.strip() for c in df.columns]
+    dcol = next((c for c in df.columns if "date" in c.lower()), df.columns[0])
+    df["Date"] = pd.to_datetime(df[dcol], dayfirst=True, errors="coerce")
+    for c in ["Sent", "Delivered", "Read", "Failed", "Canceled", "Total"]:
+        df[c] = pd.to_numeric(df.get(c, 0), errors="coerce").fillna(0).astype(int)
+    df["Undelivered"] = (df["Sent"] - df["Delivered"]).clip(0)
+    df["Unread"]      = (df["Delivered"] - df["Read"]).clip(0)
+    df["Month"]       = df["Date"].dt.strftime("%B %Y")
+    df["MonthSort"]   = df["Date"].dt.year * 100 + df["Date"].dt.month
+    return df.sort_values("Date").reset_index(drop=True)
+
+
 @st.cache_data
 def build_summary_from_rekap(raw):
     """Bangun tabel summary broadcast dari Rekap WAI.
@@ -433,32 +456,23 @@ def classify_response(msg, kw_janji, kw_sudah, kw_hubungi, kw_nopush):
 # ═══════════════════════════════════════════════════════════
 # LOAD DATA
 # ═══════════════════════════════════════════════════════════
-_rekap_raw = f_rekap.read()
-df_rekap   = load_rekap(_rekap_raw)
-df         = build_summary_from_rekap(_rekap_raw)   # summary dibangun dari Rekap WAI
+df = load_summary(f_sum.read())
 
-# Tampilkan debug info di sidebar
-if df.empty or df["Date"].isna().all():
+_rekap_raw = f_rekap.read() if has_rekap else None
+df_rekap   = load_rekap(_rekap_raw) if _rekap_raw else None
+
+# Tampilkan debug status Rekap di sidebar jika ada
+if df_rekap is not None and "status_values" in df.attrs:
     with st.sidebar:
         st.markdown("---")
-        st.error("Tanggal tidak terbaca dari Rekap WAI.")
-        st.markdown(f'<p style="font-size:10px;color:#F87171">Kolom yang dicoba: <b>send_now, date</b><br>Kolom tersedia: {", ".join(df_rekap.columns[:10].tolist())}</p>', unsafe_allow_html=True)
-
-if "status_values" in df.attrs:
-    with st.sidebar:
-        st.markdown("---")
-        st.markdown('<p style="font-size:11px;font-weight:600;color:#94A3B8;margin-bottom:4px">NILAI KOLOM STATUS DI REKAP</p>', unsafe_allow_html=True)
-        sv = df.attrs["status_values"]
+        st.markdown('<p style="font-size:11px;font-weight:600;color:#94A3B8;margin-bottom:4px">STATUS DI REKAP</p>', unsafe_allow_html=True)
+        sv = df.attrs.get("status_values", {})
         rows = "".join([
             f'<tr><td style="font-size:10px;color:#CBD5E1;padding:2px 4px">{k}</td>'
             f'<td style="font-size:10px;color:#94A3B8;padding:2px 4px;text-align:right">{v:,}</td></tr>'
             for k, v in sorted(sv.items(), key=lambda x: -x[1])
         ])
         st.markdown(f'<table style="width:100%">{rows}</table>', unsafe_allow_html=True)
-        na_dropped = df.attrs.get("na_dropped", 0)
-        if na_dropped:
-            st.markdown(f'<p style="font-size:10px;color:#F59E0B;margin-top:4px">N/A dibuang: <b>{na_dropped:,}</b> baris tidak dihitung.</p>', unsafe_allow_html=True)
-        st.caption("Cek apakah nilai status sudah terbaca dengan benar di funnel atas.")
 
 conv, phone_col_detected = None, None
 if has_conv:
