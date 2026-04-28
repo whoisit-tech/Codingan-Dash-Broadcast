@@ -449,7 +449,7 @@ def classify_response(msg, kw_janji, kw_sudah, kw_hubungi, kw_nopush):
             return "Hubungi Kami"
     for kw in kw_nopush.split(","):
         if kw.strip() and kw.strip() in msg_lower:
-            return "No Push"
+            return "Lainnya"
     return "Lainnya"
 
 
@@ -506,6 +506,26 @@ def pct(a, b): return f"{a/b:.1%}" if b else "0%"
 
 
 # ═══════════════════════════════════════════════════════════
+# BRIDGE — hitung angka Conversation dalam konteks Summary
+# Semua tab pakai variabel ini agar angka nyambung
+# ═══════════════════════════════════════════════════════════
+# Filter conversation sesuai bulan yang dipilih
+conv_filtered = None
+n_balas       = 0   # jumlah sesi unik yang balas (ada di Conversation)
+n_tidak_balas = 0   # Read - yang balas (tidak ada di Conversation)
+
+if conv is not None:
+    cdf_bridge = conv[conv["_orig"] == "IN"].copy()
+    if sel_month != "Semua Bulan" and cdf_bridge["_date"].notna().any():
+        cdf_bridge = cdf_bridge[cdf_bridge["_date"].dt.strftime("%B %Y") == sel_month]
+    conv_filtered = cdf_bridge
+    n_balas       = cdf_bridge["_sess"].nunique()
+    # Tidak balas = Read dari Summary dikurangi yang ada di Conversation
+    # (Read = yang buka pesan, sebagian balas sebagian tidak)
+    n_tidak_balas = max(0, R - n_balas)
+
+
+# ═══════════════════════════════════════════════════════════
 # PERIOD HEADER
 # ═══════════════════════════════════════════════════════════
 try:
@@ -555,31 +575,47 @@ tab_idx  = {label: i for i, label in enumerate(tab_labels)}
 # ═══════════════════════════════════════════════════════════
 with tab_objs[tab_idx["Rekap Upload"]]:
 
-    # ── Funnel summary dari file Summary ──
+    # ── Flow funnel nyambung dari Summary ke Conversation ──
     st.markdown('<p class="sh">Ringkasan Broadcast</p>', unsafe_allow_html=True)
+
+    # Baris 1: Total
     st.markdown(f'''
-    <div style="display:grid;grid-template-columns:1fr;gap:8px;margin-bottom:10px">
-      {mbox("Data Upload", T, "100%", "#1E293B", "#F8FAFC", "#CBD5E1")}
-    </div>
-    ''', unsafe_allow_html=True)
+    <div style="display:grid;grid-template-columns:1fr;gap:8px;margin-bottom:8px">
+      {mbox("Total Data Upload", T, "100% — base semua perhitungan", "#1E293B", "#F8FAFC", "#CBD5E1")}
+    </div>''', unsafe_allow_html=True)
 
-    _ca, _cb = st.columns(2)
-    with _ca:
+    # Baris 2: Failed vs Sent
+    _c1, _c2 = st.columns(2)
+    with _c1:
         st.markdown(mbox("Failed Broadcast", F, f"{pct(F,T)} dari upload", "#B91C1C", "#FEF2F2", "#FECACA"), unsafe_allow_html=True)
-    with _cb:
-        st.markdown(mbox("Success Broadcast", S, f"{pct(S,T)} dari upload", "#15803D", "#F0FDF4", "#86EFAC"), unsafe_allow_html=True)
+    with _c2:
+        st.markdown(mbox("Sent (Berhasil Kirim)", S, f"{pct(S,T)} dari upload", "#15803D", "#F0FDF4", "#86EFAC"), unsafe_allow_html=True)
 
-    _ca2, _cb2 = st.columns(2)
-    with _ca2:
-        st.markdown(mbox("Delivered", D, f"{pct(D,T)} dari upload", "#1D4ED8", "#EFF6FF", "#93C5FD"), unsafe_allow_html=True)
-    with _cb2:
-        st.markdown(mbox("Sent (Belum Delivered)", UD, f"{pct(UD,T)} dari upload", "#D97706", "#FFFBEB", "#FDE68A"), unsafe_allow_html=True)
+    # Baris 3: Delivered vs Undelivered
+    _c3, _c4 = st.columns(2)
+    with _c3:
+        st.markdown(mbox("Delivered", D, f"{pct(D,S)} dari sent", "#1D4ED8", "#EFF6FF", "#93C5FD"), unsafe_allow_html=True)
+    with _c4:
+        st.markdown(mbox("Belum Delivered", UD, f"{pct(UD,S)} dari sent", "#D97706", "#FFFBEB", "#FDE68A"), unsafe_allow_html=True)
 
-    _ca3, _cb3 = st.columns(2)
-    with _ca3:
-        st.markdown(mbox("Read", R, f"{pct(R,D)} dari delivered", "#0E7490", "#ECFEFF", "#67E8F9"), unsafe_allow_html=True)
-    with _cb3:
-        st.markdown(mbox("Unread", UR, f"{pct(UR,D)} dari delivered", "#7C3AED", "#FAF5FF", "#C4B5FD"), unsafe_allow_html=True)
+    # Baris 4: Read vs Unread
+    _c5, _c6 = st.columns(2)
+    with _c5:
+        st.markdown(mbox("Read (Dibuka)", R, f"{pct(R,D)} dari delivered", "#0E7490", "#ECFEFF", "#67E8F9"), unsafe_allow_html=True)
+    with _c6:
+        st.markdown(mbox("Unread (Tidak Dibuka)", UR, f"{pct(UR,D)} dari delivered", "#7C3AED", "#FAF5FF", "#C4B5FD"), unsafe_allow_html=True)
+
+    # Baris 5: dari Read — Balas vs Tidak Balas (dari Conversation)
+    if conv is not None:
+        st.markdown(
+            f'''<div class="info-box" style="margin-top:8px">
+            Dari <b>{R:,}</b> yang membuka pesan (Read):
+            <b style="color:#15803D">{n_balas:,} ({pct(n_balas,R)})</b> membalas WA &nbsp;|&nbsp;
+            <b style="color:#B91C1C">{n_tidak_balas:,} ({pct(n_tidak_balas,R)})</b> tidak membalas.
+            Lihat breakdown balasan di tab <b>Funnel Response</b>.
+            </div>''',
+            unsafe_allow_html=True
+        )
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown('<p class="sh">Detail per Batch Upload</p>', unsafe_allow_html=True)
@@ -1251,7 +1287,9 @@ if conv is not None and "Funnel Response" in tab_idx:
         ).reset_index()
         sess_all["_phone_norm"] = sess_all["_phone"].apply(normalize_phone)
 
-        total_sesi = len(sess_all)
+        total_sesi = len(sess_all)  # = n_balas (yang ada di conversation)
+        # Sanity check: total_sesi harusnya = n_balas dari bridge
+        # n_tidak_balas sudah dihitung di bridge: Read - total_sesi
 
         # ── Level 1: klasifikasi utama ──────────────────────
         def lvl1(msg):
@@ -1378,7 +1416,7 @@ if conv is not None and "Funnel Response" in tab_idx:
 
         # ── RENDER ───────────────────────────────────────────
         l1_counts = sess_all["_l1"].value_counts()
-        L1_ORDER  = ["Sudah Bayar","Janji Bayar","No Push","Hubungi Kami","Broken Promise","Wrong Number"]
+        L1_ORDER  = ["Sudah Bayar","Janji Bayar","Hubungi Kami","Broken Promise","Wrong Number","Lainnya"]
 
         def node(label, count, total_base, color):
             pv = count / total_base * 100 if total_base else 0
@@ -1398,9 +1436,23 @@ if conv is not None and "Funnel Response" in tab_idx:
         <div style="background:#1E3A5F;border-radius:8px;padding:10px 20px;margin-bottom:20px;
                     display:flex;justify-content:space-between;align-items:center">
           <span style="color:#fff;font-weight:700;font-size:15px">Funnel Response Nasabah</span>
-          <span style="color:rgba(255,255,255,.6);font-size:12px">Total sesi: <b style="color:#fff">{total_sesi:,}</b></span>
+          <span style="color:rgba(255,255,255,.6);font-size:12px">
+            Balas WA: <b style="color:#fff">{total_sesi:,}</b>
+            &nbsp;|&nbsp; Tidak Balas: <b style="color:#fff">{n_tidak_balas:,}</b>
+            &nbsp;|&nbsp; Total Read: <b style="color:#fff">{R:,}</b>
+          </span>
         </div>
         """, unsafe_allow_html=True)
+
+        # ── INFO KONTEKS ANGKA ──────────────────────────────
+        st.markdown(f'''
+        <div class="info-box">
+        Dari <b>{R:,} Read</b> di Summary:
+        <b style="color:#0F766E">{total_sesi:,} ({pct(total_sesi,R)}) membalas WA</b>
+        dan <b style="color:#64748B">{n_tidak_balas:,} ({pct(n_tidak_balas,R)}) tidak membalas</b>.
+        Breakdown di bawah adalah dari <b>{total_sesi:,} yang membalas</b> — persentase dihitung dari jumlah ini.
+        </div>
+        ''', unsafe_allow_html=True)
 
         # ── TREE VIEW — persis seperti gambar PPT ────────────
         # Tiap baris: kotak L1 kiri → panah → kotak-kotak L2 kanan
@@ -1426,7 +1478,7 @@ if conv is not None and "Funnel Response" in tab_idx:
                     f'</div>'
                 )
 
-            pv1 = cnt_l1 / total_sesi * 100 if total_sesi else 0
+            pv1 = cnt_l1 / total_sesi * 100 if total_sesi else 0  # % dari yang balas
             l1_html = (
                 f'<div style="background:{clr1};border-radius:20px;padding:11px 18px;'
                 f'text-align:center;min-width:150px;flex-shrink:0">'
