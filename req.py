@@ -527,41 +527,12 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 
-# ═══════════════════════════════════════════════════════════
-# FUNNEL METRICS
-# ═══════════════════════════════════════════════════════════
 def mbox(lbl, val, pct_str, fg, bg, border):
     return f"""<div class="mbox" style="background:{bg};border-color:{border};color:{fg}">
       <div class="mbox-lbl">{lbl}</div>
       <div class="mbox-val">{val:,}</div>
       <div class="mbox-pct">{pct_str}</div>
     </div>"""
-
-st.markdown(f"""
-<div style="display:grid;grid-template-columns:1fr;gap:8px;margin-bottom:10px">
-  {mbox("Data Upload", T, "100%", "#1E293B", "#F8FAFC", "#CBD5E1")}
-</div>
-""", unsafe_allow_html=True)
-
-ca, cb = st.columns(2)
-with ca:
-    st.markdown(mbox("Failed Broadcast", F, f"{pct(F,T)} dari upload", "#B91C1C", "#FEF2F2", "#FECACA"), unsafe_allow_html=True)
-with cb:
-    st.markdown(mbox("Success Broadcast", S, f"{pct(S,T)} dari upload", "#15803D", "#F0FDF4", "#86EFAC"), unsafe_allow_html=True)
-
-ca2, cb2 = st.columns(2)
-with ca2:
-    st.markdown(mbox("Delivered", D, f"{pct(D,T)} dari upload", "#1D4ED8", "#EFF6FF", "#93C5FD"), unsafe_allow_html=True)
-with cb2:
-    st.markdown(mbox("Sent (Belum Delivered)", UD, f"{pct(UD,T)} dari upload", "#D97706", "#FFFBEB", "#FDE68A"), unsafe_allow_html=True)
-
-ca3, cb3 = st.columns(2)
-with ca3:
-    st.markdown(mbox("Read", R, f"{pct(R,D)} dari delivered", "#0E7490", "#ECFEFF", "#67E8F9"), unsafe_allow_html=True)
-with cb3:
-    st.markdown(mbox("Unread", UR, f"{pct(UR,D)} dari delivered", "#7C3AED", "#FAF5FF", "#C4B5FD"), unsafe_allow_html=True)
-
-st.markdown("<br>", unsafe_allow_html=True)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -583,6 +554,34 @@ tab_idx  = {label: i for i, label in enumerate(tab_labels)}
 # TAB 1 — REKAP UPLOAD
 # ═══════════════════════════════════════════════════════════
 with tab_objs[tab_idx["Rekap Upload"]]:
+
+    # ── Funnel summary dari file Summary ──
+    st.markdown('<p class="sh">Ringkasan Broadcast</p>', unsafe_allow_html=True)
+    st.markdown(f'''
+    <div style="display:grid;grid-template-columns:1fr;gap:8px;margin-bottom:10px">
+      {mbox("Data Upload", T, "100%", "#1E293B", "#F8FAFC", "#CBD5E1")}
+    </div>
+    ''', unsafe_allow_html=True)
+
+    _ca, _cb = st.columns(2)
+    with _ca:
+        st.markdown(mbox("Failed Broadcast", F, f"{pct(F,T)} dari upload", "#B91C1C", "#FEF2F2", "#FECACA"), unsafe_allow_html=True)
+    with _cb:
+        st.markdown(mbox("Success Broadcast", S, f"{pct(S,T)} dari upload", "#15803D", "#F0FDF4", "#86EFAC"), unsafe_allow_html=True)
+
+    _ca2, _cb2 = st.columns(2)
+    with _ca2:
+        st.markdown(mbox("Delivered", D, f"{pct(D,T)} dari upload", "#1D4ED8", "#EFF6FF", "#93C5FD"), unsafe_allow_html=True)
+    with _cb2:
+        st.markdown(mbox("Sent (Belum Delivered)", UD, f"{pct(UD,T)} dari upload", "#D97706", "#FFFBEB", "#FDE68A"), unsafe_allow_html=True)
+
+    _ca3, _cb3 = st.columns(2)
+    with _ca3:
+        st.markdown(mbox("Read", R, f"{pct(R,D)} dari delivered", "#0E7490", "#ECFEFF", "#67E8F9"), unsafe_allow_html=True)
+    with _cb3:
+        st.markdown(mbox("Unread", UR, f"{pct(UR,D)} dari delivered", "#7C3AED", "#FAF5FF", "#C4B5FD"), unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
     st.markdown('<p class="sh">Detail per Batch Upload</p>', unsafe_allow_html=True)
 
     rows_html = ""
