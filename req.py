@@ -555,988 +555,638 @@ def mbox(lbl, val, pct_str, fg, bg, border):
     </div>"""
 
 
-# ═══════════════════════════════════════════════════════════
-# TABS
-# ═══════════════════════════════════════════════════════════
-tab_labels = ["Rekap Upload"]
-if conv is not None:
-    tab_labels.append("Response WA")
-    tab_labels.append("Isi Pesan")
-    tab_labels.append("Funnel Response")
-if has_realisasi:
-    tab_labels.append("Realisasi Bayar")
-
-tab_objs = st.tabs(tab_labels)
-tab_idx  = {label: i for i, label in enumerate(tab_labels)}
-
 
 # ═══════════════════════════════════════════════════════════
-# TAB 1 — REKAP UPLOAD
+# HELPERS
 # ═══════════════════════════════════════════════════════════
-with tab_objs[tab_idx["Rekap Upload"]]:
+import re as _re
 
-    # ── Flow funnel nyambung dari Summary ke Conversation ──
-    st.markdown('<p class="sh">Ringkasan Broadcast</p>', unsafe_allow_html=True)
+def normalize_phone(s):
+    s = ''.join(filter(str.isdigit, str(s).strip()))
+    if s.startswith("0"):   s = "62" + s[1:]
+    elif s.startswith("8"): s = "62" + s
+    return s
 
-    # Baris 1: Total
+def find_col(df, candidates):
+    for c in candidates:
+        for col in df.columns:
+            if c.strip().lower() == col.strip().lower():
+                return col
+    return None
+
+def to_xlsx(df_out):
+    buf = BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as w:
+        df_out.to_excel(w, index=False)
+    return buf.getvalue()
+
+
+# ═══════════════════════════════════════════════════════════
+# TABS — 4 TAB BERSIH
+# ═══════════════════════════════════════════════════════════
+tabs_available = ["Rekap Broadcast"]
+if has_conv:              tabs_available.append("Response Nasabah")
+if has_realisasi:         tabs_available.append("Detail per Kontrak")
+if has_conv:              tabs_available.append("Analisis Teks")
+
+tab_objs = st.tabs(tabs_available)
+ti = {label: i for i, label in enumerate(tabs_available)}
+
+
+# ═══════════════════════════════════════════════════════════
+# TAB 1 — REKAP BROADCAST (dari Summary)
+# ═══════════════════════════════════════════════════════════
+with tab_objs[ti["Rekap Broadcast"]]:
+
+    # Funnel cards
+    st.markdown('<p class="sh">Funnel Broadcast</p>', unsafe_allow_html=True)
+
     st.markdown(f'''
-    <div style="display:grid;grid-template-columns:1fr;gap:8px;margin-bottom:8px">
+    <div style="display:grid;grid-template-columns:1fr;gap:6px;margin-bottom:8px">
       {mbox("Total Data Upload", T, "100% — base semua perhitungan", "#1E293B", "#F8FAFC", "#CBD5E1")}
     </div>''', unsafe_allow_html=True)
 
-    # Baris 2: Failed vs Sent
-    _c1, _c2 = st.columns(2)
-    with _c1:
-        st.markdown(mbox("Failed Broadcast", F, f"{pct(F,T)} dari upload", "#B91C1C", "#FEF2F2", "#FECACA"), unsafe_allow_html=True)
-    with _c2:
-        st.markdown(mbox("Sent (Berhasil Kirim)", S, f"{pct(S,T)} dari upload", "#15803D", "#F0FDF4", "#86EFAC"), unsafe_allow_html=True)
+    c1, c2 = st.columns(2)
+    with c1: st.markdown(mbox("Failed", F, f"{pct(F,T)} dari upload", "#B91C1C", "#FEF2F2", "#FECACA"), unsafe_allow_html=True)
+    with c2: st.markdown(mbox("Sent (Berhasil Kirim)", S, f"{pct(S,T)} dari upload", "#15803D", "#F0FDF4", "#86EFAC"), unsafe_allow_html=True)
 
-    # Baris 3: Delivered vs Undelivered
-    _c3, _c4 = st.columns(2)
-    with _c3:
-        st.markdown(mbox("Delivered", D, f"{pct(D,S)} dari sent", "#1D4ED8", "#EFF6FF", "#93C5FD"), unsafe_allow_html=True)
-    with _c4:
-        st.markdown(mbox("Belum Delivered", UD, f"{pct(UD,S)} dari sent", "#D97706", "#FFFBEB", "#FDE68A"), unsafe_allow_html=True)
+    c3, c4 = st.columns(2)
+    with c3: st.markdown(mbox("Delivered", D, f"{pct(D,S)} dari sent", "#1D4ED8", "#EFF6FF", "#93C5FD"), unsafe_allow_html=True)
+    with c4: st.markdown(mbox("Belum Delivered", UD, f"{pct(UD,S)} dari sent", "#D97706", "#FFFBEB", "#FDE68A"), unsafe_allow_html=True)
 
-    # Baris 4: Read vs Unread
-    _c5, _c6 = st.columns(2)
-    with _c5:
-        st.markdown(mbox("Read (Dibuka)", R, f"{pct(R,D)} dari delivered", "#0E7490", "#ECFEFF", "#67E8F9"), unsafe_allow_html=True)
-    with _c6:
-        st.markdown(mbox("Unread (Tidak Dibuka)", UR, f"{pct(UR,D)} dari delivered", "#7C3AED", "#FAF5FF", "#C4B5FD"), unsafe_allow_html=True)
+    c5, c6 = st.columns(2)
+    with c5: st.markdown(mbox("Read (Dibaca)", R, f"{pct(R,D)} dari delivered", "#0E7490", "#ECFEFF", "#67E8F9"), unsafe_allow_html=True)
+    with c6: st.markdown(mbox("Unread (Tidak Dibaca)", UR, f"{pct(UR,D)} dari delivered", "#7C3AED", "#FAF5FF", "#C4B5FD"), unsafe_allow_html=True)
 
-    # Baris 5: dari Read — Balas vs Tidak Balas (dari Conversation)
-    if conv is not None:
-        st.markdown(
-            f'''<div class="info-box" style="margin-top:8px">
-            Dari <b>{R:,}</b> yang membuka pesan (Read):
-            <b style="color:#15803D">{n_balas:,} ({pct(n_balas,R)})</b> membalas WA &nbsp;|&nbsp;
-            <b style="color:#B91C1C">{n_tidak_balas:,} ({pct(n_tidak_balas,R)})</b> tidak membalas.
-            Lihat breakdown balasan di tab <b>Funnel Response</b>.
-            </div>''',
-            unsafe_allow_html=True
-        )
+    # Nyambung ke Conversation
+    if has_conv:
+        cdf_cnt = conv[conv["_orig"] == "IN"].copy()
+        if sel_month != "Semua Bulan" and cdf_cnt["_date"].notna().any():
+            cdf_cnt = cdf_cnt[cdf_cnt["_date"].dt.strftime("%B %Y") == sel_month]
+        n_balas       = cdf_cnt["_sess"].nunique()
+        n_tidak_balas = max(0, R - n_balas)
+        st.markdown(f'''
+        <div class="info-box" style="margin-top:10px">
+        Dari <b>{R:,} yang membaca</b>:
+        <b style="color:#15803D">{n_balas:,} ({pct(n_balas,R)}) membalas WA</b> —
+        <b style="color:#B91C1C">{n_tidak_balas:,} ({pct(n_tidak_balas,R)}) tidak membalas</b>.
+        Lihat breakdown balasan di tab <b>Response Nasabah</b>.
+        </div>''', unsafe_allow_html=True)
 
+    # Tabel per batch
     st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown('<p class="sh">Detail per Batch Upload</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sh">Detail per Batch</p>', unsafe_allow_html=True)
 
     rows_html = ""
     for _, r in dff.iterrows():
-        fp = r["Failed"] / r["Total"] if r["Total"] else 0
-        dp = r["Delivered"] / r["Total"] if r["Total"] else 0
-        rp = r["Read"] / r["Delivered"] if r["Delivered"] else 0
-
-        def p(v, hi, lo, inv=False):
-            if inv:
-                cls = "g" if v < hi else "r" if v > lo else "o"
-            else:
-                cls = "g" if v > hi else "r" if v < lo else "o"
+        fp = r["Failed"]/r["Total"] if r["Total"] else 0
+        dp = r["Delivered"]/r["Total"] if r["Total"] else 0
+        rp = r["Read"]/r["Delivered"] if r["Delivered"] else 0
+        def pill(v, hi, lo, inv=False):
+            cls = ("g" if (v<hi if inv else v>hi) else "r" if (v>lo if inv else v<lo) else "o")
             return f'<span class="pill {cls}">{v:.0%}</span>'
-
         rows_html += f"""<tr>
           <td class="left">{r['Date'].strftime('%d %b %Y')}</td>
           <td>{int(r['Total']):,}</td>
-          <td style="color:#DC2626">{int(r['Failed']):,}</td>
-          <td>{p(fp,.15,.30,inv=True)}</td>
+          <td style="color:#DC2626">{int(r['Failed']):,}</td><td>{pill(fp,.15,.30,True)}</td>
           <td style="color:#15803D">{int(r['Sent']):,}</td>
-          <td style="color:#1D4ED8">{int(r['Delivered']):,}</td>
-          <td>{p(dp,.70,.50)}</td>
-          <td style="color:#0E7490">{int(r['Read']):,}</td>
-          <td>{p(rp,.65,.45)}</td>
+          <td style="color:#1D4ED8">{int(r['Delivered']):,}</td><td>{pill(dp,.70,.50)}</td>
+          <td style="color:#0E7490">{int(r['Read']):,}</td><td>{pill(rp,.65,.45)}</td>
           <td style="color:#7C3AED">{int(r['Unread']):,}</td>
         </tr>"""
 
-    fp_t = F / T if T else 0
-    dp_t = D / T if T else 0
-    rp_t = R / D if D else 0
-
-    def p_t(v, hi, lo, inv=False):
-        if inv:
-            cls = "g" if v < hi else "r" if v > lo else "o"
-        else:
-            cls = "g" if v > hi else "r" if v < lo else "o"
+    fp_t=F/T if T else 0; dp_t=D/T if T else 0; rp_t=R/D if D else 0
+    def pill_t(v,hi,lo,inv=False):
+        cls=("g" if (v<hi if inv else v>hi) else "r" if (v>lo if inv else v<lo) else "o")
         return f'<span class="pill {cls}">{v:.1%}</span>'
-
     rows_html += f"""<tr class="tot">
       <td class="left">TOTAL ({len(dff)} batch)</td>
-      <td>{T:,}</td><td>{F:,}</td><td>{p_t(fp_t,.15,.30,inv=True)}</td>
-      <td>{S:,}</td><td>{D:,}</td><td>{p_t(dp_t,.70,.50)}</td>
-      <td>{R:,}</td><td>{p_t(rp_t,.65,.45)}</td><td>{UR:,}</td>
+      <td>{T:,}</td><td>{F:,}</td><td>{pill_t(fp_t,.15,.30,True)}</td>
+      <td>{S:,}</td><td>{D:,}</td><td>{pill_t(dp_t,.70,.50)}</td>
+      <td>{R:,}</td><td>{pill_t(rp_t,.65,.45)}</td><td>{UR:,}</td>
     </tr>"""
 
     st.markdown(f"""
-    <div style="overflow-x:auto;max-height:420px;overflow-y:auto">
+    <div style="overflow-x:auto;max-height:400px;overflow-y:auto">
     <table class="t"><thead><tr>
       <th class="left">Tanggal</th><th>Total</th>
       <th>Failed</th><th>Fail%</th><th>Sent</th>
       <th>Delivered</th><th>Del%</th><th>Read</th><th>Read%</th><th>Unread</th>
     </tr></thead><tbody>{rows_html}</tbody></table></div>
-    <p style="font-size:10px;color:#94A3B8;margin-top:6px">
-    Fail% dan Del% dihitung dari Total Upload. Read% dihitung dari Delivered.</p>
+    <p style="font-size:10px;color:#94A3B8;margin-top:4px">Fail%/Del% dari Total · Read% dari Delivered</p>
     """, unsafe_allow_html=True)
 
+    # Trend chart
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown('<p class="sh">Tren per Batch</p>', unsafe_allow_html=True)
-
     fig = go.Figure()
     fig.add_trace(go.Bar(x=dff["Date"], y=dff["Total"], name="Total", marker_color="#E2E8F0", opacity=0.8))
-    for m, c, d in [("Delivered", "#2563EB", None), ("Read", "#0891B2", "dot"), ("Failed", "#DC2626", None)]:
+    for m, c, d in [("Delivered","#2563EB",None),("Read","#0891B2","dot"),("Failed","#DC2626",None)]:
         fig.add_trace(go.Scatter(x=dff["Date"], y=dff[m], name=m,
-            line=dict(color=c, width=2, dash=d or "solid"), mode="lines+markers",
-            marker=dict(size=5, color=c)))
-    fig.update_layout(
-        barmode="overlay", height=280, margin=dict(l=0, r=0, t=10, b=0),
+            line=dict(color=c,width=2,dash=d or "solid"), mode="lines+markers", marker=dict(size=5,color=c)))
+    fig.update_layout(barmode="overlay", height=260, margin=dict(l=0,r=0,t=10,b=0),
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="#F8FAFC",
-        font=dict(family="Inter", color="#64748B"),
-        legend=dict(orientation="h", y=-0.25, bgcolor="rgba(0,0,0,0)"),
-        xaxis=dict(gridcolor="#E2E8F0", tickformat="%d %b"),
-        yaxis=dict(gridcolor="#E2E8F0"), hovermode="x unified"
-    )
+        font=dict(family="Inter",color="#64748B"),
+        legend=dict(orientation="h",y=-0.3,bgcolor="rgba(0,0,0,0)"),
+        xaxis=dict(gridcolor="#E2E8F0",tickformat="%d %b"),
+        yaxis=dict(gridcolor="#E2E8F0"), hovermode="x unified")
     st.plotly_chart(fig, use_container_width=True)
 
-    if sel_month == "Semua Bulan":
-        st.markdown('<p class="sh">Rekap per Bulan</p>', unsafe_allow_html=True)
-        monthly = df.groupby(["Month", "MonthSort"]).agg(
-            Total=("Total", "sum"), Sent=("Sent", "sum"), Delivered=("Delivered", "sum"),
-            Read=("Read", "sum"), Failed=("Failed", "sum"), Unread=("Unread", "sum"), Uploads=("Date", "count")
-        ).reset_index().sort_values("MonthSort")
-
-        m_rows = ""
-        for _, r in monthly.iterrows():
-            fp = r["Failed"] / r["Total"] if r["Total"] else 0
-            dp = r["Delivered"] / r["Total"] if r["Total"] else 0
-            rp = r["Read"] / r["Delivered"] if r["Delivered"] else 0
-            m_rows += f"""<tr>
-              <td class="left" style="font-weight:600">{r['Month']}</td>
-              <td>{int(r['Uploads'])}</td><td>{int(r['Total']):,}</td>
-              <td style="color:#DC2626">{int(r['Failed']):,}</td>
-              <td>{p_t(fp,.15,.30,inv=True)}</td>
-              <td style="color:#15803D">{int(r['Sent']):,}</td>
-              <td style="color:#1D4ED8">{int(r['Delivered']):,}</td>
-              <td>{p_t(dp,.70,.50)}</td>
-              <td style="color:#0E7490">{int(r['Read']):,}</td>
-              <td>{p_t(rp,.65,.45)}</td>
-              <td style="color:#7C3AED">{int(r['Unread']):,}</td>
-            </tr>"""
-        st.markdown(f"""
-        <table class="t"><thead><tr>
-          <th class="left">Bulan</th><th>Batch</th><th>Total</th>
-          <th>Failed</th><th>Fail%</th><th>Sent</th>
-          <th>Delivered</th><th>Del%</th><th>Read</th><th>Read%</th><th>Unread</th>
-        </tr></thead><tbody>{m_rows}</tbody></table>
-        """, unsafe_allow_html=True)
-
 
 # ═══════════════════════════════════════════════════════════
-# TAB 2 — RESPONSE WA
+# TAB 2 — RESPONSE NASABAH
+# Flow: Conversation → klasifikasi → cross-check Rekap+SC
 # ═══════════════════════════════════════════════════════════
-if conv is not None and "Response WA" in tab_idx:
-    with tab_objs[tab_idx["Response WA"]]:
-        cdf = conv.copy()
+if has_conv and "Response Nasabah" in ti:
+    with tab_objs[ti["Response Nasabah"]]:
+
+        # ── Siapkan data Conversation ──
+        cdf = conv[conv["_orig"] == "IN"].copy()
         if sel_month != "Semua Bulan" and cdf["_date"].notna().any():
             cdf = cdf[cdf["_date"].dt.strftime("%B %Y") == sel_month]
 
-        in_df  = cdf[cdf["_orig"] == "IN"]
-        btn_df = in_df[in_df["_type"].isin(["button", "button_reply"])]
-        total_sessions = cdf["_sess"].nunique()
-
-        s1, s2, s3, s4 = st.columns(4)
-        for col_obj, lbl, val, fg, bg, bd in [
-            (s1, "Total Sesi",     total_sessions,                       "#1D4ED8", "#EFF6FF", "#93C5FD"),
-            (s2, "Pesan Masuk",    len(in_df),                           "#15803D", "#F0FDF4", "#86EFAC"),
-            (s3, "Button Replies", len(btn_df),                          "#D97706", "#FFFBEB", "#FDE68A"),
-            (s4, "Teks Bebas",     len(in_df[in_df["_type"] == "text"]), "#7C3AED", "#FAF5FF", "#C4B5FD"),
-        ]:
-            with col_obj:
-                st.markdown(f"""<div class="mbox" style="background:{bg};border-color:{bd};color:{fg}">
-                  <div class="mbox-lbl">{lbl}</div>
-                  <div class="mbox-val">{val:,}</div>
-                </div>""", unsafe_allow_html=True)
-
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        mt_lbl = {
-            "text": "Teks bebas", "button": "Klik tombol", "button_reply": "Balasan tombol",
-            "list_reply": "Pilihan menu", "image": "Foto", "document": "Dokumen",
-            "audio": "Pesan suara", "reaction": "Reaksi", "sticker": "Sticker",
-            "unsupported": "Tidak didukung",
-        }
-        available_types = sorted(in_df["_type"].dropna().unique().tolist())
-        type_options    = ["Semua Type"] + available_types
-        type_labels     = ["Semua Type"] + [f"{t} -- {mt_lbl.get(t, t)}" for t in available_types]
-
-        st.markdown('<p class="sh">Filter Message Type</p>', unsafe_allow_html=True)
-        sel_type_label = st.selectbox(
-            "Pilih tipe pesan:",
-            options=type_labels,
-            index=0,
-            label_visibility="collapsed"
-        )
-        sel_type = type_options[type_labels.index(sel_type_label)]
-        filtered_in_df = in_df if sel_type == "Semua Type" else in_df[in_df["_type"] == sel_type]
-
-        st.markdown("<br>", unsafe_allow_html=True)
-        cl, cr = st.columns([3, 2])
-
-        with cl:
-            filter_label = "" if sel_type == "Semua Type" else \
-                f" &nbsp;<span style='font-size:10px;background:#DBEAFE;color:#1D4ED8;padding:2px 8px;border-radius:10px'>{sel_type}</span>"
-            st.markdown(f'<p class="sh">Button Responses dari Nasabah{filter_label}</p>', unsafe_allow_html=True)
-            btn_counts = filtered_in_df["_msg"].value_counts().reset_index()
-            btn_counts.columns = ["Pesan", "Jumlah"]
-            total_btn = int(btn_counts["Jumlah"].sum())
-
-            if total_btn == 0:
-                st.info("Tidak ada pesan di tipe dan periode ini.")
-            else:
-                colors = ["#15803D", "#1D4ED8", "#DC2626", "#7C3AED", "#D97706", "#DB2777", "#0891B2"]
-                bars = ""
-                for i, row in btn_counts.iterrows():
-                    p_val = row["Jumlah"] / total_btn
-                    c = colors[i % len(colors)]
-                    label_text = str(row['Pesan'])
-                    bars += f"""<div class="brow">
-                      <div class="blbl" title="{label_text}">{label_text[:26]}{"..." if len(label_text) > 26 else ""}</div>
-                      <div class="btrk">
-                        <div class="bfil" style="width:{p_val*100:.1f}%;background:{c}">
-                          <span class="bnum">{int(row['Jumlah']):,}</span>
-                        </div>
-                      </div>
-                      <div class="bpct">{p_val:.1%}</div>
-                    </div>"""
-                st.markdown(f"""<div class="card">
-                  <p style="font-size:11px;color:#94A3B8;margin:0 0 12px">
-                    Total <b>{total_btn:,}</b> pesan dari <b>{total_sessions:,}</b> sesi</p>
-                  {bars}</div>""", unsafe_allow_html=True)
-
-        with cr:
-            st.markdown('<p class="sh">Breakdown Message Type</p>', unsafe_allow_html=True)
-            mt = in_df["_type"].value_counts().reset_index()
-            mt.columns = ["Type", "Jumlah"]
-            total_mt = int(mt["Jumlah"].sum())
-            mt_rows = ""
-            for _, row in mt.iterrows():
-                is_sel  = (sel_type != "Semua Type" and row["Type"] == sel_type)
-                row_sty = "background:#EFF6FF;font-weight:700;" if is_sel else ""
-                pill_cls = "b" if is_sel else "s"
-                mt_rows += f"""<tr style="{row_sty}">
-                  <td class="left">{row['Type']}</td>
-                  <td style="font-weight:600">{int(row['Jumlah']):,}</td>
-                  <td><span class="pill {pill_cls}">{row['Jumlah']/total_mt:.1%}</span></td>
-                  <td class="left" style="color:#94A3B8;font-size:11px">{mt_lbl.get(row['Type'], '')}</td>
-                </tr>"""
-            st.markdown(f"""<table class="t"><thead><tr>
-              <th class="left">Type</th><th>Jumlah</th><th>%</th><th class="left">Keterangan</th>
-            </tr></thead><tbody>{mt_rows}</tbody></table>
-            <p style="font-size:10px;color:#94A3B8;margin-top:8px">
-            Klik filter di atas untuk menyaring isi pesan berdasarkan tipe.</p>""",
-            unsafe_allow_html=True)
-
-
-# ═══════════════════════════════════════════════════════════
-# TAB 3 — ISI PESAN
-# ═══════════════════════════════════════════════════════════
-if conv is not None and "Isi Pesan" in tab_idx:
-    with tab_objs[tab_idx["Isi Pesan"]]:
-        cdf2 = conv[conv["_orig"] == "IN"].copy()
-        if sel_month != "Semua Bulan" and cdf2["_date"].notna().any():
-            cdf2 = cdf2[cdf2["_date"].dt.strftime("%B %Y") == sel_month]
-
-        total_in = len(cdf2)
-        st.markdown('<p class="sh">Breakdown Isi Pesan dari Nasabah</p>', unsafe_allow_html=True)
-
-        msg_counts = (cdf2[cdf2["_msg"].str.strip() != ""]["_msg"]
-                      .str.strip().value_counts().reset_index())
-        msg_counts.columns = ["Pesan", "Jumlah"]
-        total_msg = int(msg_counts["Jumlah"].sum())
-
-        colors_bar = ["#15803D", "#1D4ED8", "#DC2626", "#7C3AED", "#D97706",
-                      "#DB2777", "#0891B2", "#0F766E", "#9333EA", "#B45309"]
-        bars_html = ""
-        for i, row in msg_counts.iterrows():
-            pv  = row["Jumlah"] / total_msg if total_msg else 0
-            clr = colors_bar[i % len(colors_bar)]
-            label_text = str(row['Pesan'])
-            bars_html += f"""<div class="brow">
-              <div class="blbl" title="{label_text}">{label_text[:28]}{"..." if len(label_text) > 28 else ""}</div>
-              <div class="btrk">
-                <div class="bfil" style="width:{pv*100:.1f}%;background:{clr}">
-                  <span class="bnum">{int(row['Jumlah']):,}</span>
-                </div>
-              </div>
-              <div class="bpct">{pv:.1%}</div>
-            </div>"""
-
-        st.markdown(f"""<div class="card">
-          <p style="font-size:11px;color:#94A3B8;margin:0 0 14px">
-            Total <b>{total_msg:,}</b> pesan dari <b>{total_in:,}</b> pesan masuk</p>
-          {bars_html}
-        </div>""", unsafe_allow_html=True)
-
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown('<p class="sh">Tabel Detail Isi Pesan</p>', unsafe_allow_html=True)
-
-        fc1, fc2 = st.columns([3, 1])
-        with fc1:
-            kw = st.text_input("Cari isi pesan", placeholder="contoh: bayar, angsuran, denda...")
-        with fc2:
-            n_rows = st.number_input("Maks baris", 20, 500, 100, 10)
-
-        tbl_df = msg_counts.copy()
-        if kw:
-            tbl_df = tbl_df[tbl_df["Pesan"].str.contains(kw, case=False, na=False)]
-        tbl_df = tbl_df.head(n_rows)
-
-        st.markdown(f'<p style="font-size:11px;color:#94A3B8;margin:0 0 8px">Menampilkan <b>{len(tbl_df)}</b> baris</p>', unsafe_allow_html=True)
-
-        tbl_rows = ""
-        for i, row in tbl_df.iterrows():
-            pv  = row["Jumlah"] / total_msg if total_msg else 0
-            bar = (f'<div style="background:#E2E8F0;border-radius:4px;height:10px;overflow:hidden">'
-                   f'<div style="width:{pv*100:.1f}%;height:100%;background:#2563EB;border-radius:4px"></div></div>')
-            tbl_rows += f"""<tr>
-              <td style="font-weight:600;color:#475569">{i+1}</td>
-              <td class="left">{str(row['Pesan'])}</td>
-              <td style="font-weight:700;color:#1D4ED8">{int(row['Jumlah']):,}</td>
-              <td><span class="pill b">{pv:.1%}</span></td>
-              <td style="min-width:120px">{bar}</td>
-            </tr>"""
-
-        st.markdown(f"""<div style="max-height:480px;overflow-y:auto">
-        <table class="t"><thead><tr>
-          <th>#</th><th class="left">Isi Pesan</th><th>Jumlah</th><th>%</th><th>Proporsi</th>
-        </tr></thead><tbody>{tbl_rows}</tbody></table></div>""", unsafe_allow_html=True)
-
-
-# ═══════════════════════════════════════════════════════════
-# TAB 4 — REALISASI BAYAR
-# ═══════════════════════════════════════════════════════════
-if has_realisasi and "Realisasi Bayar" in tab_idx:
-    with tab_objs[tab_idx["Realisasi Bayar"]]:
-
-        st.markdown("""
-        <div class="info-box">
-        <b>Alur join data:</b>
-        <b>Conversation.Contact</b> (no HP) &rarr; <b>Rekap.no_wa</b> &rarr; ambil <b>body_param_2</b> (no kontrak) &rarr; <b>SC.NOKONTRAK</b> &rarr; cek <b>lastpaiddate</b>.
-        Status bayar <b>hanya dari SC.lastpaiddate</b>. Rekap dipakai sebagai jembatan no HP ke no kontrak saja.
-        </div>
-        """, unsafe_allow_html=True)
-
-        cdf_real = conv[conv["_orig"] == "IN"].copy()
-        if sel_month != "Semua Bulan" and cdf_real["_date"].notna().any():
-            cdf_real = cdf_real[cdf_real["_date"].dt.strftime("%B %Y") == sel_month]
-
-        cdf_real["_phone_norm"] = cdf_real["_phone"].apply(normalize_phone)
-
-        sess_grp  = cdf_real.sort_values("_date").groupby("_sess").first().reset_index()
-        sess_msgs = cdf_real.groupby("_sess")["_msg"].apply(lambda x: " ".join(x.dropna())).reset_index()
+        # Satu sesi bisa banyak pesan — gabung semua pesan per sesi
+        sess_msgs = cdf.groupby("_sess")["_msg"].apply(
+            lambda x: " ".join(x.dropna().astype(str))
+        ).reset_index()
         sess_msgs.columns = ["_sess", "_all_msgs"]
-        sess_grp = sess_grp.merge(sess_msgs, on="_sess", how="left")
-        sess_grp["_kategori"] = sess_grp["_all_msgs"].apply(
-            lambda m: classify_response(m, kw_janji, kw_sudah, kw_hubungi, kw_nopush)
-        )
+        sess_info = cdf.groupby("_sess").agg(
+            _phone=("_phone","first"),
+            _date=("_date","min"),
+            _n_pesan=("_msg","count")
+        ).reset_index()
+        sess = sess_msgs.merge(sess_info, on="_sess", how="left")
+        sess["_phone_norm"] = sess["_phone"].apply(normalize_phone)
+        n_balas = len(sess)
+        n_tidak_balas = max(0, R - n_balas)
 
-        # ── Step 1: Bangun lookup Rekap: no_wa (norm) -> {nokontrak, tgl_bayar} ──
-        # Conversation.Contact (no HP nasabah) == Rekap.no_wa
-        # Rekap.body_param_2 == nokontrak nasabah
-        # Rekap.Tanggal Bayar == tgl bayar aktual
-
-        rek_lookup = {}   # {phone_norm: {nokontrak, tgl_bayar_rek, bayar_rek}}
-        if df_rekap is not None:
-            rek_phone_col = find_col(df_rekap, ["no_wa", "NoWA", "nowa", col_phone_rekap])
-            rek_paid_col  = None  # Tidak dipakai — status bayar hanya dari SC.lastpaiddate
-            rek_nok_col   = find_col(df_rekap, ["body_param_2", "body_param_1", col_nokontrak_rek, "NOKONTRAK"])
-
-            if rek_phone_col:
-                for _, row in df_rekap.iterrows():
-                    norm = normalize_phone(str(row.get(rek_phone_col, "")))
-                    if not norm or norm == "62":
-                        continue
-                    nok = str(row.get(rek_nok_col, "")).strip() if rek_nok_col else ""
-                    # Rekap hanya dipakai untuk mapping no HP -> no kontrak
-                    # Status bayar HANYA dari SC.lastpaiddate, bukan dari Rekap
-                    if norm not in rek_lookup:
-                        rek_lookup[norm] = {
-                            "nokontrak": nok,
-                        }
-            else:
-                st.markdown(
-                    f'<div class="warn-box">Kolom No HP tidak ditemukan di Rekap (dicari: <b>no_wa</b>). '
-                    f'Kolom tersedia: {", ".join(df_rekap.columns[:20].tolist())}</div>',
-                    unsafe_allow_html=True
-                )
-
-        # ── Step 2: Bangun lookup SC: nokontrak -> {lastpaiddate, nama} ──
-        # SC adalah SATU-SATUNYA sumber kebenaran status bayar
-        sc_lookup = {}   # {nokontrak: {bayar_sc, tgl_bayar_sc, nama}}
-        if df_sc is not None:
-            sc_nok_col   = find_col(df_sc, ["NOKONTRAK", "nokontrak", col_nokontrak_sc])
-            sc_paid_col  = find_col(df_sc, ["lastpaiddate", "LastPaidDate", col_lastpaid])
-            sc_nama_col  = find_col(df_sc, ["custname", "CustName", col_custname])
-
-            if sc_nok_col:
-                for _, row in df_sc.iterrows():
-                    nok = str(row.get(sc_nok_col, "")).strip()
-                    if not nok or nok in ["", "nan", "None"]:
-                        continue
-                    lp    = row.get(sc_paid_col) if sc_paid_col else None
-                    bayar = pd.notna(lp) and str(lp).strip() not in ["", "nan", "NaT", "None", "0"]
-                    sc_lookup[nok] = {
-                        "bayar_sc":    bayar,
-                        "tgl_bayar_sc": str(lp) if bayar else None,
-                        "nama":        str(row.get(sc_nama_col, "")) if sc_nama_col else "",
-                    }
-            else:
-                st.markdown(
-                    f'<div class="warn-box">Kolom NOKONTRAK tidak ditemukan di SC. '
-                    f'Kolom tersedia: {", ".join(df_sc.columns[:20].tolist())}</div>',
-                    unsafe_allow_html=True
-                )
-
-        # ── Step 3: Merge ke session — chain: Contact → Rekap → SC ──
-        def get_paid_info(phone_norm):
-            # Step 1: cari no kontrak via Rekap (mapping no HP -> no kontrak)
-            rek = rek_lookup.get(phone_norm)
-            if rek is None:
-                return {
-                    "bayar": None, "tgl_bayar": None,
-                    "nokontrak": "", "nama": "", "source": "Tidak Ditemukan di Rekap"
-                }
-
-            nokontrak = rek["nokontrak"]
-
-            # Step 2: cek status bayar HANYA dari SC.lastpaiddate
-            sc = sc_lookup.get(nokontrak) if nokontrak else None
-
-            if sc is not None:
-                return {
-                    "bayar":     sc["bayar_sc"],
-                    "tgl_bayar": sc["tgl_bayar_sc"],
-                    "nokontrak": nokontrak,
-                    "nama":      sc["nama"],
-                    "source":    "SC",
-                }
-            else:
-                # Ketemu di Rekap tapi no kontrak tidak ada di SC
-                # Status bayar UNKNOWN karena tidak bisa cek lastpaiddate
-                return {
-                    "bayar":     None,
-                    "tgl_bayar": None,
-                    "nokontrak": nokontrak,
-                    "nama":      "",
-                    "source":    "Rekap ada, SC tidak match",
-                }
-
-        sess_grp["_paid_info"]  = sess_grp["_phone_norm"].apply(get_paid_info)
-        sess_grp["_bayar"]      = sess_grp["_paid_info"].apply(lambda x: x["bayar"])
-        sess_grp["_tgl_bayar"]  = sess_grp["_paid_info"].apply(lambda x: x["tgl_bayar"])
-        sess_grp["_nokontrak"]  = sess_grp["_paid_info"].apply(lambda x: x["nokontrak"])
-        sess_grp["_nama"]       = sess_grp["_paid_info"].apply(lambda x: x["nama"])
-        sess_grp["_datasource"] = sess_grp["_paid_info"].apply(lambda x: x["source"])
-
-        total_resp  = len(sess_grp)
-        found_in_db = sess_grp["_bayar"].notna().sum()
-        not_found   = sess_grp["_bayar"].isna().sum()
-
-        st.markdown('<p class="sh">Ringkasan Realisasi per Kategori Response</p>', unsafe_allow_html=True)
-
-        KATEGORI_ORDER  = ["Janji Bayar", "Sudah Bayar", "Hubungi Kami", "No Push", "Lainnya"]
-        KATEGORI_COLORS = {
-            "Janji Bayar":  ("#15803D", "#DCFCE7", "#86EFAC"),
-            "Sudah Bayar":  ("#1D4ED8", "#EFF6FF", "#93C5FD"),
-            "Hubungi Kami": ("#D97706", "#FFFBEB", "#FDE68A"),
-            "No Push":      ("#B91C1C", "#FEF2F2", "#FECACA"),
-            "Lainnya":      ("#475569", "#F1F5F9", "#CBD5E1"),
-        }
-
-        realisasi_rows = ""
-        summary_data   = []
-
-        for kat in KATEGORI_ORDER:
-            grp = sess_grp[sess_grp["_kategori"] == kat]
-            total_kat   = len(grp)
-            if total_kat == 0:
-                continue
-            found_kat   = grp["_bayar"].notna().sum()
-            bayar_kat   = grp["_bayar"].eq(True).sum()
-            belum_kat   = grp["_bayar"].eq(False).sum()
-            unknown_kat = grp["_bayar"].isna().sum()
-            real_pct    = bayar_kat / found_kat if found_kat else 0
-            fg, bg, bd  = KATEGORI_COLORS.get(kat, ("#475569", "#F1F5F9", "#CBD5E1"))
-
-            summary_data.append({
-                "Kategori": kat, "Total Respons": total_kat,
-                "Ada di DB": found_kat, "Sudah Bayar": bayar_kat,
-                "Belum Bayar": belum_kat, "Tidak Ditemukan": unknown_kat,
-                "Realisasi %": real_pct
-            })
-
-            pct_bar    = (f'<div style="background:#E2E8F0;border-radius:4px;height:8px;overflow:hidden">'
-                          f'<div style="width:{real_pct*100:.1f}%;height:100%;background:{fg};border-radius:4px"></div></div>')
-            pill_bayar = f'<span class="pill g">{bayar_kat:,} bayar</span>'
-            pill_belum = f'<span class="pill r">{belum_kat:,} belum</span>'
-            pill_unk   = f'<span class="pill s">{unknown_kat:,} N/A</span>'
-
-            realisasi_rows += f"""<tr>
-              <td class="left"><span style="font-weight:700;color:{fg}">{kat}</span></td>
-              <td style="font-weight:700">{total_kat:,}</td>
-              <td>{found_kat:,}</td>
-              <td>{pill_bayar}</td>
-              <td>{pill_belum}</td>
-              <td>{pill_unk}</td>
-              <td style="min-width:130px">
-                <div style="display:flex;align-items:center;gap:6px">
-                  <span style="font-weight:700;color:{fg};font-size:13px">{real_pct:.1%}</span>
-                  {pct_bar}
-                </div>
-              </td>
-            </tr>"""
-
-        st.markdown(f"""
-        <div style="overflow-x:auto">
-        <table class="t"><thead><tr>
-          <th class="left">Kategori Response</th>
-          <th>Total Respons</th>
-          <th>Ada di DB</th>
-          <th>Sudah Bayar</th>
-          <th>Belum Bayar</th>
-          <th>Tdk Ditemukan</th>
-          <th style="min-width:160px">Realisasi %</th>
-        </tr></thead><tbody>{realisasi_rows}</tbody></table>
-        </div>
-        <p style="font-size:10px;color:#94A3B8;margin-top:6px">
-        Realisasi % = Sudah Bayar / (Sudah Bayar + Belum Bayar). Tidak termasuk yang tidak ditemukan di DB.</p>
-        """, unsafe_allow_html=True)
-
-        if summary_data:
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.markdown('<p class="sh">Highlight Realisasi</p>', unsafe_allow_html=True)
-
-            janji_row = next((x for x in summary_data if x["Kategori"] == "Janji Bayar"), None)
-            sudah_row = next((x for x in summary_data if x["Kategori"] == "Sudah Bayar"), None)
-
-            hc1, hc2, hc3, hc4 = st.columns(4)
-            with hc1:
-                val = janji_row["Sudah Bayar"] if janji_row else 0
-                tot = janji_row["Ada di DB"] if janji_row else 0
-                r   = janji_row["Realisasi %"] if janji_row else 0
-                st.markdown(f"""<div class="mbox" style="background:#F0FDF4;border-color:#86EFAC;color:#15803D">
-                  <div class="mbox-lbl">Janji Bayar - Beneran Bayar</div>
-                  <div class="mbox-val">{val:,}</div>
-                  <div class="mbox-pct">{r:.1%} dari {tot:,} yg janji</div>
-                </div>""", unsafe_allow_html=True)
-            with hc2:
-                val = janji_row["Belum Bayar"] if janji_row else 0
-                r   = 1 - janji_row["Realisasi %"] if janji_row else 0
-                st.markdown(f"""<div class="mbox" style="background:#FEF2F2;border-color:#FECACA;color:#B91C1C">
-                  <div class="mbox-lbl">Janji Bayar - Ingkar Janji</div>
-                  <div class="mbox-val">{val:,}</div>
-                  <div class="mbox-pct">{r:.1%} dari yg janji</div>
-                </div>""", unsafe_allow_html=True)
-            with hc3:
-                val = sudah_row["Sudah Bayar"] if sudah_row else 0
-                tot = sudah_row["Ada di DB"] if sudah_row else 0
-                r   = sudah_row["Realisasi %"] if sudah_row else 0
-                st.markdown(f"""<div class="mbox" style="background:#EFF6FF;border-color:#93C5FD;color:#1D4ED8">
-                  <div class="mbox-lbl">Klaim Sudah Bayar - Terverifikasi</div>
-                  <div class="mbox-val">{val:,}</div>
-                  <div class="mbox-pct">{r:.1%} dari {tot:,} yg klaim</div>
-                </div>""", unsafe_allow_html=True)
-            with hc4:
-                total_bayar_all = sum(x["Sudah Bayar"] for x in summary_data)
-                total_ada_db    = sum(x["Ada di DB"] for x in summary_data)
-                r_all = total_bayar_all / total_ada_db if total_ada_db else 0
-                st.markdown(f"""<div class="mbox" style="background:#F3E8FF;border-color:#C4B5FD;color:#7C3AED">
-                  <div class="mbox-lbl">Overall Realisasi Bayar</div>
-                  <div class="mbox-val">{total_bayar_all:,}</div>
-                  <div class="mbox-pct">{r_all:.1%} dari {total_ada_db:,} teridentifikasi</div>
-                </div>""", unsafe_allow_html=True)
-
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown('<p class="sh">Grafik Realisasi per Kategori</p>', unsafe_allow_html=True)
-
-        if summary_data:
-            fig2 = go.Figure()
-            cats       = [x["Kategori"] for x in summary_data]
-            bayar_vals = [x["Sudah Bayar"] for x in summary_data]
-            belum_vals = [x["Belum Bayar"] for x in summary_data]
-            unk_vals   = [x["Tidak Ditemukan"] for x in summary_data]
-
-            fig2.add_trace(go.Bar(name="Sudah Bayar", x=cats, y=bayar_vals,
-                marker_color="#22C55E", text=bayar_vals, textposition="auto"))
-            fig2.add_trace(go.Bar(name="Belum Bayar", x=cats, y=belum_vals,
-                marker_color="#EF4444", text=belum_vals, textposition="auto"))
-            fig2.add_trace(go.Bar(name="Tidak Ditemukan", x=cats, y=unk_vals,
-                marker_color="#94A3B8", text=unk_vals, textposition="auto"))
-
-            fig2.update_layout(
-                barmode="group", height=300, margin=dict(l=0, r=0, t=10, b=0),
-                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="#F8FAFC",
-                font=dict(family="Inter", color="#64748B"),
-                legend=dict(orientation="h", y=-0.3, bgcolor="rgba(0,0,0,0)"),
-                xaxis=dict(gridcolor="#E2E8F0"),
-                yaxis=dict(gridcolor="#E2E8F0"),
-            )
-            st.plotly_chart(fig2, use_container_width=True)
-
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown('<p class="sh">Detail per Nasabah</p>', unsafe_allow_html=True)
-
-        kat_filter = st.selectbox("Filter Kategori", ["Semua"] + KATEGORI_ORDER, key="kat_filter_real")
-        bayar_filter = st.radio(
-            "Filter Status Bayar",
-            ["Semua", "Sudah Bayar", "Belum Bayar", "Tidak Ditemukan"],
-            horizontal=True, key="bayar_filter_real"
-        )
-
-        detail_df = sess_grp[[
-            "_phone_norm", "_kategori", "_msg", "_bayar",
-            "_tgl_bayar", "_nokontrak", "_nama", "_datasource", "_date"
-        ]].copy()
-        detail_df.columns = [
-            "No HP", "Kategori Response", "Pesan", "Bayar",
-            "Tgl Bayar", "No Kontrak", "Nama", "Sumber Data", "Tgl Chat"
+        # ── Klasifikasi pesan ──
+        L1_RULES = [
+            ("Sudah Bayar",  [r"\b(sudah|udah)\s*(bayar|transfer|tf|lunas)\b",
+                               r"\b(sudah\s*lunas|lunas|tadi\s*bayar|bukti)\b"]),
+            ("Janji Bayar",  [r"\b(janji|akan|mau|siap|insya\s*allah|nanti)\s*(bayar|transfer|tf|lunasi)\b",
+                               r"\b(besok|lusa|tanggal\s*\d+|tgl\s*\d+|senin|selasa|rabu|kamis|jumat|sabtu)\b"]),
+            ("Hubungi Kami", [r"\b(hubungi|kontak|telepon|wa\s*balik|call|cs)\b",
+                               r"\b(minta\s*autodebet|autodebet|cara\s*bayar|gimana\s*bayar)\b",
+                               r"\b(nego|denda|keringanan|diskon|restruktur|cicil)\b",
+                               r"\b(salah\s*nomor|bukan\s*saya|wrong\s*number)\b"]),
+            ("Tidak Bisa",   [r"\b(tidak\s*bisa|gabisa|belum\s*bisa|gak\s*bisa|blm\s*bisa)\b",
+                               r"\b(stop|jangan|hapus|unsubscribe|tidak\s*ada\s*uang|lagi\s*susah)\b"]),
         ]
 
-        if kat_filter != "Semua":
-            detail_df = detail_df[detail_df["Kategori Response"] == kat_filter]
-        if bayar_filter == "Sudah Bayar":
-            detail_df = detail_df[detail_df["Bayar"] == True]
-        elif bayar_filter == "Belum Bayar":
-            detail_df = detail_df[detail_df["Bayar"] == False]
-        elif bayar_filter == "Tidak Ditemukan":
-            detail_df = detail_df[detail_df["Bayar"].isna()]
+        L2_RULES = {
+            "Sudah Bayar":  [
+                ("Klaim Lunas",     [r"\b(lunas|sudah\s*lunas)\b"]),
+                ("Klaim Transfer",  [r"\b(transfer|tf|kirim)\b"]),
+                ("Kirim Bukti",     [r"\b(bukti|struk|foto|screenshot)\b"]),
+            ],
+            "Janji Bayar":  [
+                ("Ada Tanggal",     [r"\b(tanggal|tgl)\s*\d+\b", r"\b(besok|lusa|senin|selasa|rabu|kamis|jumat|sabtu)\b"]),
+                ("Janji Umum",      None),
+            ],
+            "Hubungi Kami": [
+                ("Autodebet",       [r"\b(autodebet|auto\s*debet)\b"]),
+                ("Cara Bayar",      [r"\b(cara\s*bayar|gimana\s*bayar|minta\s*rekening)\b"]),
+                ("Nego/Cicil",      [r"\b(nego|cicil|keringanan|diskon|restruktur)\b"]),
+                ("Salah Nomor",     [r"\b(salah\s*nomor|bukan\s*saya|wrong\s*number)\b"]),
+            ],
+            "Tidak Bisa":   [
+                ("Tidak Ada Dana",  [r"\b(tidak\s*ada\s*uang|lagi\s*susah|belum\s*ada)\b"]),
+                ("Minta Stop",      [r"\b(stop|jangan|hapus|unsubscribe)\b"]),
+                ("Belum Bisa",      None),
+            ],
+        }
 
-        detail_df["Status"] = detail_df["Bayar"].apply(
-            lambda x: "Sudah Bayar" if x is True else ("Belum Bayar" if x is False else "Tidak Ditemukan")
-        )
-        detail_df = detail_df.drop(columns=["Bayar"])
-
-        st.markdown(
-            f'<p style="font-size:11px;color:#94A3B8;margin-bottom:8px">Menampilkan <b>{len(detail_df):,}</b> baris</p>',
-            unsafe_allow_html=True
-        )
-        st.dataframe(detail_df, use_container_width=True, height=400)
-
-        def export_excel_df(df_out):
-            buf = BytesIO()
-            with pd.ExcelWriter(buf, engine="openpyxl") as w:
-                df_out.to_excel(w, index=False, sheet_name="Realisasi")
-            return buf.getvalue()
-
-        dl1, dl2 = st.columns(2)
-        with dl1:
-            st.download_button(
-                "Download Hasil Filter (.xlsx)",
-                export_excel_df(detail_df),
-                "realisasi_filter.xlsx",
-                "application/vnd.ms-excel"
-            )
-        with dl2:
-            full_export = sess_grp[[
-                "_phone_norm", "_kategori", "_msg", "_bayar",
-                "_tgl_bayar", "_nokontrak", "_nama", "_datasource", "_date"
-            ]].copy()
-            full_export.columns = [
-                "No HP", "Kategori", "Pesan", "Bayar",
-                "Tgl Bayar", "No Kontrak", "Nama", "Sumber", "Tgl Chat"
-            ]
-            full_export["Status"] = full_export["Bayar"].apply(
-                lambda x: "Sudah Bayar" if x is True else ("Belum Bayar" if x is False else "Tidak Ditemukan")
-            )
-            st.download_button(
-                "Download Semua Data Realisasi (.xlsx)",
-                export_excel_df(full_export),
-                "realisasi_semua.xlsx",
-                "application/vnd.ms-excel"
-            )
-
-        cov_pct = found_in_db / total_resp if total_resp else 0
-        n_rekap_match  = sess_grp["_datasource"].str.contains("SC|Rekap", na=False).sum()
-        n_rekap_only   = sess_grp["_datasource"].str.contains("Rekap WAI", na=False).sum()
-        n_sc_match     = sess_grp["_datasource"].str.contains("^SC$", na=False).sum()
-        n_not_found    = sess_grp["_datasource"].str.contains("Tidak Ditemukan", na=False).sum()
-
-        st.markdown(f"""
-        <div class="warn-box" style="margin-top:16px">
-        <b>Coverage:</b> {found_in_db:,} dari {total_resp:,} sesi ({cov_pct:.1%}) berhasil di-match.
-        <br>Match ke SC: <b>{n_sc_match:,}</b> &nbsp;|&nbsp;
-        Fallback Rekap saja: <b>{n_rekap_only:,}</b> &nbsp;|&nbsp;
-        Tidak ditemukan di Rekap: <b>{n_not_found:,}</b>
-        <br>Kalau banyak yang tidak ditemukan, pastikan format No HP di Conversation sama dengan di kolom <b>no_wa</b> Rekap WAI.
-        </div>
-        """, unsafe_allow_html=True)
-
-
-# ═══════════════════════════════════════════════════════════
-# TAB — FUNNEL RESPONSE
-# ═══════════════════════════════════════════════════════════
-if conv is not None and "Funnel Response" in tab_idx:
-    with tab_objs[tab_idx["Funnel Response"]]:
-        import re as _re
-
-        fr_df = conv[conv["_orig"] == "IN"].copy()
-        if sel_month != "Semua Bulan" and fr_df["_date"].notna().any():
-            fr_df = fr_df[fr_df["_date"].dt.strftime("%B %Y") == sel_month]
-
-        # Gabung semua pesan per sesi
-        sess_all = fr_df.groupby("_sess").agg(
-            _phone=("_phone", "first"),
-            _all_msgs=("_msg", lambda x: " ".join(x.dropna().astype(str))),
-            _date=("_date", "first"),
-        ).reset_index()
-        sess_all["_phone_norm"] = sess_all["_phone"].apply(normalize_phone)
-
-        total_sesi = len(sess_all)  # = n_balas (yang ada di conversation)
-        # Sanity check: total_sesi harusnya = n_balas dari bridge
-        # n_tidak_balas sudah dihitung di bridge: Read - total_sesi
-
-        # ── Level 1: klasifikasi utama ──────────────────────
-        def lvl1(msg):
+        def classify_l1(msg):
             m = msg.lower()
-            if _re.search(r"sudah\s*bayar|udah\s*bayar|transfer|tadi\s*bayar|sudah\s*lunas|lunas", m):
-                return "Sudah Bayar"
-            if _re.search(r"janji|akan\s*bayar|mau\s*bayar|siap\s*bayar|besok\s*bayar|bayar\s*nanti", m):
-                return "Janji Bayar"
-            if _re.search(r"hubungi|kontak\s*kami|cs|call\s*center|ke\s*kantor|datang\s*ke", m):
-                return "Hubungi Kami"
-            if _re.search(r"tidak\s*bisa|gabisa|belum\s*bisa|blm\s*bisa|gak\s*bisa|tidak\s*mampu|broken", m):
-                return "Broken Promise"
-            if _re.search(r"salah\s*nomor|bukan\s*saya|bukan\s*nasabah|wrong\s*number|tidak\s*kenal", m):
-                return "Wrong Number"
-            return "No Push"
-
-        # ── Level 2: breakdown per kategori ─────────────────
-        def lvl2_sudah(msg, bayar_sc):
-            if bayar_sc is True:
-                return "Beneran Bayar"
-            if bayar_sc is False:
-                return "Tidak Bayar"
-            return "Unknown (tidak ada di SC)"
-
-        def lvl2_janji(msg, bayar_sc):
-            if bayar_sc is True:
-                return "Real Promise"
-            if bayar_sc is False:
-                return "Broken Promise"
-            return "Unknown"
-
-        def lvl2_hubungi(msg):
-            m = msg.lower()
-            if _re.search(r"autodebet|auto\s*debet", m):          return "Minta Autodebet"
-            if _re.search(r"sudah\s*bayar|udah\s*bayar|transfer", m): return "Bayar"
-            if _re.search(r"cara\s*bayar|bayar\s*gimana|bagaimana\s*bayar", m): return "Minta Cara Bayar"
-            if _re.search(r"nego|denda|keringanan|diskon|cicil", m): return "Nego Denda"
-            if _re.search(r"ke\s*kantor|datang|kantor", m):        return "Ke Kantor"
-            return "Unknown"
-
-        def lvl2_broken(msg):
-            m = msg.lower()
-            if _re.search(r"tidak\s*bisa\s*bayar|gabisa\s*bayar|belum\s*ada\s*uang|belum\s*ada\s*dana", m): return "Tidak Bisa Bayar"
-            if _re.search(r"cicil|nyicil|dicicil|rubah\s*jt|reschedule|restruktur", m): return "Minta Cicil/Rubah JT"
-            if _re.search(r"ke\s*kantor|datang|langsung", m):      return "Ke Kantor"
-            if _re.search(r"nego|denda|keringanan", m):             return "Nego Denda"
+            for label, pats in L1_RULES:
+                for p in pats:
+                    if _re.search(p, m): return label
             return "Lainnya"
 
-        # ── Build paid lookup (sama seperti tab realisasi) ───
-        _rek_lkp = {}
+        def classify_l2(msg, l1):
+            rules = L2_RULES.get(l1, [])
+            m = msg.lower()
+            for label, pats in rules:
+                if pats is None: continue
+                for p in pats:
+                    if _re.search(p, m): return label
+            return rules[-1][0] if rules else "Lainnya"
+
+        sess["_l1"] = sess["_all_msgs"].apply(classify_l1)
+        sess["_l2"] = sess.apply(lambda r: classify_l2(r["_all_msgs"], r["_l1"]), axis=1)
+
+        # ── Cross-check Rekap + SC ──
+        # Step 1: Rekap → mapping no HP ke no kontrak
+        rek_map = {}  # {phone_norm: nokontrak}
         if df_rekap is not None:
-            _rpc = find_col(df_rekap, ["no_wa", col_phone_rekap])
-            _rnk = find_col(df_rekap, ["body_param_2", col_nokontrak_rek])
-            if _rpc:
+            rp_col  = find_col(df_rekap, ["no_wa","NoWA",col_phone_rekap])
+            rnk_col = find_col(df_rekap, ["body_param_2","body_param_1",col_nokontrak_rek])
+            if rp_col:
                 for _, row in df_rekap.iterrows():
-                    norm = normalize_phone(str(row.get(_rpc, "")))
-                    if norm and norm != "62":
-                        _rek_lkp[norm] = str(row.get(_rnk, "")).strip() if _rnk else ""
+                    norm = normalize_phone(str(row.get(rp_col,"")))
+                    nok  = str(row.get(rnk_col,"")).strip() if rnk_col else ""
+                    if norm and norm != "62" and nok:
+                        rek_map[norm] = nok
 
-        _sc_lkp = {}
+        # Step 2: SC → status bayar per no kontrak
+        sc_map = {}  # {nokontrak: {bayar, tgl, nama}}
         if df_sc is not None:
-            _snk = find_col(df_sc, ["NOKONTRAK", col_nokontrak_sc])
-            _slp = find_col(df_sc, ["lastpaiddate", col_lastpaid])
-            _snm = find_col(df_sc, ["custname", col_custname])
-            if _snk:
+            snk_col  = find_col(df_sc, ["NOKONTRAK","nokontrak",col_nokontrak_sc])
+            slp_col  = find_col(df_sc, ["lastpaiddate","LastPaidDate",col_lastpaid])
+            snam_col = find_col(df_sc, ["custname","CustName",col_custname])
+            if snk_col:
                 for _, row in df_sc.iterrows():
-                    nok = str(row.get(_snk, "")).strip()
-                    if nok:
-                        lp = row.get(_slp) if _slp else None
-                        bayar = pd.notna(lp) and str(lp).strip() not in ["", "nan", "NaT", "None", "0"]
-                        _sc_lkp[nok] = {"bayar": bayar, "nama": str(row.get(_snm, "")) if _snm else ""}
+                    nok = str(row.get(snk_col,"")).strip()
+                    if not nok: continue
+                    lp    = row.get(slp_col) if slp_col else None
+                    bayar = pd.notna(lp) and str(lp).strip() not in ["","nan","NaT","None","0"]
+                    sc_map[nok] = {
+                        "bayar": bayar,
+                        "tgl":   str(lp) if bayar else "",
+                        "nama":  str(row.get(snam_col,"")) if snam_col else "",
+                    }
 
-        def get_bayar_sc(phone_norm):
-            nok = _rek_lkp.get(phone_norm)
-            if not nok:
-                return None
-            sc = _sc_lkp.get(nok)
-            if sc is None:
-                return None
-            return sc["bayar"]
+        def get_status(phone_norm):
+            nok = rek_map.get(phone_norm)
+            if not nok: return None, None, None
+            sc = sc_map.get(nok)
+            if not sc: return None, nok, None
+            return sc["bayar"], nok, sc["nama"]
 
-        # ── Klasifikasi semua sesi ───────────────────────────
-        sess_all["_l1"]      = sess_all["_all_msgs"].apply(lvl1)
-        sess_all["_bayar_sc"]= sess_all["_phone_norm"].apply(get_bayar_sc)
+        sess[["_bayar","_nokontrak","_nama"]] = sess["_phone_norm"].apply(
+            lambda p: pd.Series(get_status(p))
+        )
 
-        def get_l2(row):
-            l1, msg, bayar = row["_l1"], row["_all_msgs"], row["_bayar_sc"]
-            if l1 == "Sudah Bayar":   return lvl2_sudah(msg, bayar)
-            if l1 == "Janji Bayar":   return lvl2_janji(msg, bayar)
-            if l1 == "Hubungi Kami":  return lvl2_hubungi(msg)
-            if l1 == "Broken Promise":return lvl2_broken(msg)
-            if l1 == "Wrong Number":  return "Wrong Number"
-            return "No Push"
+        # ── TAMPILAN ──────────────────────────────────────────
+        # Header angka nyambung dari Summary
+        st.markdown(f'''
+        <div style="background:#1E3A5F;border-radius:8px;padding:12px 20px;margin-bottom:16px">
+          <div style="color:#fff;font-weight:700;font-size:14px;margin-bottom:6px">Ringkasan Response</div>
+          <div style="display:flex;gap:20px;flex-wrap:wrap">
+            <span style="color:rgba(255,255,255,.6);font-size:12px">Read (Summary): <b style="color:#67E8F9">{R:,}</b></span>
+            <span style="color:rgba(255,255,255,.6);font-size:12px">Membalas: <b style="color:#86EFAC">{n_balas:,} ({pct(n_balas,R)})</b></span>
+            <span style="color:rgba(255,255,255,.6);font-size:12px">Tidak Membalas: <b style="color:#FCA5A5">{n_tidak_balas:,} ({pct(n_tidak_balas,R)})</b></span>
+          </div>
+        </div>''', unsafe_allow_html=True)
 
-        sess_all["_l2"] = sess_all.apply(get_l2, axis=1)
+        # Funnel kotak: Read → Tidak Balas | Balas → L1 → L2
+        ARW = '<span style="color:#94A3B8;font-size:18px;margin:0 4px;flex-shrink:0">&#8594;</span>'
 
-        # ── WARNA ────────────────────────────────────────────
         L1_COLOR = {
-            "Sudah Bayar":    "#15803D",
-            "Janji Bayar":    "#1D4ED8",
-            "No Push":        "#475569",
-            "Hubungi Kami":   "#D97706",
-            "Broken Promise": "#B91C1C",
-            "Wrong Number":   "#0891B2",
+            "Sudah Bayar":"#15803D","Janji Bayar":"#1D4ED8",
+            "Hubungi Kami":"#D97706","Tidak Bisa":"#B91C1C","Lainnya":"#475569"
         }
         L2_COLOR = {
-            "Beneran Bayar":        "#15803D",
-            "Real Promise":         "#15803D",
-            "Bayar":                "#15803D",
-            "Tidak Bayar":          "#B91C1C",
-            "Broken Promise":       "#B91C1C",
-            "Tidak Bisa Bayar":     "#B91C1C",
-            "Unknown":              "#475569",
-            "Unknown (tidak ada di SC)": "#475569",
-            "Minta Autodebet":      "#7C3AED",
-            "Minta Cara Bayar":     "#0891B2",
-            "Nego Denda":           "#D97706",
-            "Ke Kantor":            "#0F766E",
-            "Minta Cicil/Rubah JT": "#DB2777",
-            "Lainnya":              "#94A3B8",
-            "Wrong Number":         "#0891B2",
-            "No Push":              "#64748B",
+            "Klaim Lunas":"#15803D","Klaim Transfer":"#0891B2","Kirim Bukti":"#7C3AED",
+            "Ada Tanggal":"#1D4ED8","Janji Umum":"#3B82F6",
+            "Autodebet":"#0891B2","Cara Bayar":"#1D4ED8","Nego/Cicil":"#7C3AED","Salah Nomor":"#94A3B8",
+            "Tidak Ada Dana":"#DC2626","Minta Stop":"#B91C1C","Belum Bisa":"#EF4444",
+            "Lainnya":"#64748B",
+            "Beneran Bayar":"#15803D","Ingkar Janji":"#DC2626","Unknown":"#475569",
         }
 
-        # ── RENDER ───────────────────────────────────────────
-        l1_counts = sess_all["_l1"].value_counts()
-        L1_ORDER  = ["Sudah Bayar","Janji Bayar","Hubungi Kami","Broken Promise","Wrong Number","Lainnya"]
-
-        def node(label, count, total_base, color):
-            pv = count / total_base * 100 if total_base else 0
+        def node_box(label, count, base, color):
+            pv = count / base * 100 if base else 0
+            bg = "#1E293B" if "Unknown" in label else color
             return (
-                f'<div style="background:{color};border-radius:20px;padding:11px 16px;'
-                f'text-align:center;display:inline-block;width:100%">'
-                f'<div style="color:rgba(255,255,255,.85);font-size:11px;font-weight:600;margin-bottom:3px">{label}</div>'
-                f'<div style="color:#fff;font-size:22px;font-weight:800;line-height:1">{count:,}</div>'
-                f'<div style="color:rgba(255,255,255,.7);font-size:11px;margin-top:2px">({pv:.2f}%)</div>'
+                f'<div style="background:{bg};border-radius:18px;padding:9px 13px;'
+                f'text-align:center;min-width:115px;flex-shrink:0;display:inline-block">'
+                f'<div style="color:rgba(255,255,255,.8);font-size:10px;font-weight:600;margin-bottom:2px">{label}</div>'
+                f'<div style="color:#fff;font-size:17px;font-weight:800;line-height:1.1">{count:,}</div>'
+                f'<div style="color:rgba(255,255,255,.65);font-size:10px">({pv:.1f}%)</div>'
                 f'</div>'
             )
 
-        arrow_down = '<div style="text-align:center;font-size:18px;color:#94A3B8;margin:4px 0">&#8595;</div>'
-        arrow_right = '<div style="padding-top:18px;text-align:center;font-size:20px;color:#94A3B8">&#8594;</div>'
+        l1_counts = sess["_l1"].value_counts()
+        L1_ORDER  = ["Sudah Bayar","Janji Bayar","Hubungi Kami","Tidak Bisa","Lainnya"]
 
-        st.markdown(f"""
-        <div style="background:#1E3A5F;border-radius:8px;padding:10px 20px;margin-bottom:20px;
-                    display:flex;justify-content:space-between;align-items:center">
-          <span style="color:#fff;font-weight:700;font-size:15px">Funnel Response Nasabah</span>
-          <span style="color:rgba(255,255,255,.6);font-size:12px">
-            Balas WA: <b style="color:#fff">{total_sesi:,}</b>
-            &nbsp;|&nbsp; Tidak Balas: <b style="color:#fff">{n_tidak_balas:,}</b>
-            &nbsp;|&nbsp; Total Read: <b style="color:#fff">{R:,}</b>
-          </span>
-        </div>
-        """, unsafe_allow_html=True)
+        # Baris 0: Read → Tidak Balas | Balas
+        st.markdown(
+            f'<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap">'
+            f'  {node_box("Read", R, T, "#0E7490")}'
+            f'  {ARW}'
+            f'  <div style="display:flex;gap:6px;flex-wrap:wrap">'
+            f'    {node_box("Tidak Membalas", n_tidak_balas, R, "#475569")}'
+            f'    {node_box("Membalas WA", n_balas, R, "#15803D")}'
+            f'  </div>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
 
-        # ── INFO KONTEKS ANGKA ──────────────────────────────
-        st.markdown(f'''
-        <div class="info-box">
-        Dari <b>{R:,} Read</b> di Summary:
-        <b style="color:#0F766E">{total_sesi:,} ({pct(total_sesi,R)}) membalas WA</b>
-        dan <b style="color:#64748B">{n_tidak_balas:,} ({pct(n_tidak_balas,R)}) tidak membalas</b>.
-        Breakdown di bawah adalah dari <b>{total_sesi:,} yang membalas</b> — persentase dihitung dari jumlah ini.
-        </div>
-        ''', unsafe_allow_html=True)
+        # Baris L1 → L2, base = n_balas
+        for l1 in L1_ORDER:
+            cnt_l1 = int(l1_counts.get(l1, 0))
+            if cnt_l1 == 0: continue
+            clr1 = L1_COLOR.get(l1, "#475569")
+            l2cnt = sess[sess["_l1"] == l1]["_l2"].value_counts()
 
-        # ── TREE VIEW — persis seperti gambar PPT ────────────
-        # Tiap baris: kotak L1 kiri → panah → kotak-kotak L2 kanan
-        shown_l1 = [k for k in L1_ORDER if k in l1_counts]
-
-        for kat in shown_l1:
-            cnt_l1 = int(l1_counts.get(kat, 0))
-            clr1   = L1_COLOR.get(kat, "#475569")
-            l2cnt  = sess_all[sess_all["_l1"] == kat]["_l2"].value_counts()
-
-            # Bangun HTML semua kotak L2
+            # L2 breakdown — tambah cross-check bayar untuk Sudah Bayar & Janji Bayar
             l2_html = ""
-            for kat2, cnt2 in l2cnt.items():
-                clr2 = L2_COLOR.get(kat2, "#64748B")
-                bg   = "#1E293B" if "Unknown" in kat2 else clr2
-                pv2  = cnt2 / cnt_l1 * 100 if cnt_l1 else 0
-                l2_html += (
-                    f'<div style="background:{bg};border-radius:20px;padding:9px 14px;'
-                    f'text-align:center;min-width:130px;flex-shrink:0">'
-                    f'<div style="color:rgba(255,255,255,.85);font-size:10px;font-weight:600;margin-bottom:2px">{kat2}</div>'
-                    f'<div style="color:#fff;font-size:18px;font-weight:800;line-height:1">{cnt2:,}</div>'
-                    f'<div style="color:rgba(255,255,255,.7);font-size:10px;margin-top:1px">({pv2:.1f}%)</div>'
-                    f'</div>'
-                )
-
-            pv1 = cnt_l1 / total_sesi * 100 if total_sesi else 0  # % dari yang balas
-            l1_html = (
-                f'<div style="background:{clr1};border-radius:20px;padding:11px 18px;'
-                f'text-align:center;min-width:150px;flex-shrink:0">'
-                f'<div style="color:rgba(255,255,255,.85);font-size:11px;font-weight:600;margin-bottom:3px">{kat}</div>'
-                f'<div style="color:#fff;font-size:22px;font-weight:800;line-height:1">{cnt_l1:,}</div>'
-                f'<div style="color:rgba(255,255,255,.7);font-size:11px;margin-top:2px">({pv1:.1f}%)</div>'
-                f'</div>'
-            )
+            if l1 in ("Sudah Bayar", "Janji Bayar"):
+                grp = sess[sess["_l1"] == l1]
+                n_bayar  = grp["_bayar"].eq(True).sum()
+                n_belum  = grp["_bayar"].eq(False).sum()
+                n_unk    = grp["_bayar"].isna().sum()
+                l2_html += node_box("Beneran Bayar", n_bayar, cnt_l1, "#15803D")
+                l2_html += node_box("Ingkar/Belum", n_belum, cnt_l1, "#DC2626")
+                l2_html += node_box("Unknown", n_unk, cnt_l1, "#475569")
+            else:
+                for l2_lbl, cnt2 in l2cnt.items():
+                    clr2 = L2_COLOR.get(l2_lbl, "#64748B")
+                    l2_html += node_box(l2_lbl, cnt2, cnt_l1, clr2)
 
             st.markdown(
-                f'<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">'
-                f'  {l1_html}'
-                f'  <span style="color:#94A3B8;font-size:22px;flex-shrink:0">&#8594;</span>'
-                f'  <div style="display:flex;gap:8px;flex-wrap:wrap">{l2_html}</div>'
+                f'<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;'
+                f'margin-left:60px;flex-wrap:wrap">'
+                f'  {node_box(l1, cnt_l1, n_balas, clr1)}'
+                f'  {ARW}'
+                f'  <div style="display:flex;gap:5px;flex-wrap:wrap">{l2_html}</div>'
                 f'</div>',
                 unsafe_allow_html=True
             )
 
-        # ── DETAIL TABEL ─────────────────────────────────────
+        # Summary tabel L1
         st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown('<p class="sh">Detail Sesi</p>', unsafe_allow_html=True)
+        st.markdown('<p class="sh">Tabel Ringkasan per Kategori</p>', unsafe_allow_html=True)
 
-        dc1, dc2 = st.columns(2)
-        with dc1:
-            sel_l1_tbl = st.selectbox(
-                "Kategori:",
-                ["Semua"] + shown_l1,
-                key="funnel_l1_tbl"
-            )
-        with dc2:
-            subset_tbl = sess_all if sel_l1_tbl == "Semua" else sess_all[sess_all["_l1"] == sel_l1_tbl]
-            l2_opts    = ["Semua"] + subset_tbl["_l2"].value_counts().index.tolist()
-            sel_l2_tbl = st.selectbox("Sub-kategori:", l2_opts, key="funnel_l2_tbl")
+        tbl_rows = ""
+        for l1 in L1_ORDER:
+            cnt_l1 = int(l1_counts.get(l1, 0))
+            if cnt_l1 == 0: continue
+            grp    = sess[sess["_l1"] == l1]
+            n_b    = grp["_bayar"].eq(True).sum()
+            n_bl   = grp["_bayar"].eq(False).sum()
+            n_u    = grp["_bayar"].isna().sum()
+            real_r = n_b / (n_b + n_bl) if (n_b + n_bl) > 0 else None
+            real_str = f'<span class="pill g">{real_r:.1%}</span>' if real_r is not None else '<span class="pill s">-</span>'
+            clr1 = L1_COLOR.get(l1,"#475569")
+            tbl_rows += f"""<tr>
+              <td class="left"><span style="font-weight:700;color:{clr1}">{l1}</span></td>
+              <td>{cnt_l1:,}</td>
+              <td><span class="pill b">{pct(cnt_l1,n_balas)}</span></td>
+              <td><span class="pill g">{n_b:,}</span></td>
+              <td><span class="pill r">{n_bl:,}</span></td>
+              <td><span class="pill s">{n_u:,}</span></td>
+              <td>{real_str}</td>
+            </tr>"""
 
-        show_df = subset_tbl if sel_l2_tbl == "Semua" else subset_tbl[subset_tbl["_l2"] == sel_l2_tbl]
-        show_df = show_df[["_phone_norm","_l1","_l2","_all_msgs","_bayar_sc","_date"]].copy()
-        show_df.columns = ["No HP","Kategori","Sub-kategori","Pesan","Bayar (SC)","Tgl Chat"]
-        show_df["Bayar (SC)"] = show_df["Bayar (SC)"].apply(
-            lambda x: "Bayar" if x is True else ("Belum" if x is False else "Unknown")
-        )
-        st.markdown(
-            f'<p style="font-size:11px;color:#94A3B8;margin-bottom:6px">Menampilkan <b>{len(show_df):,}</b> sesi</p>',
-            unsafe_allow_html=True
-        )
-        st.dataframe(show_df, use_container_width=True, height=350)
+        st.markdown(f"""
+        <table class="t"><thead><tr>
+          <th class="left">Kategori</th><th>Jumlah Sesi</th><th>% dari Balas</th>
+          <th>Beneran Bayar</th><th>Ingkar/Belum</th><th>Unknown</th><th>Realisasi %</th>
+        </tr></thead><tbody>{tbl_rows}</tbody></table>
+        <p style="font-size:10px;color:#94A3B8;margin-top:4px">
+        Realisasi % = Beneran Bayar / (Bayar + Ingkar) — tidak termasuk Unknown (tidak ditemukan di SC)</p>
+        """, unsafe_allow_html=True)
 
-        def to_xlsx(d):
-            buf = BytesIO()
-            with pd.ExcelWriter(buf, engine="openpyxl") as w:
-                d.to_excel(w, index=False)
-            return buf.getvalue()
+
+# ═══════════════════════════════════════════════════════════
+# TAB 3 — DETAIL PER KONTRAK
+# ═══════════════════════════════════════════════════════════
+if has_realisasi and "Detail per Kontrak" in ti:
+    with tab_objs[ti["Detail per Kontrak"]]:
+
+        # Rebuild sess (reuse logic — simpel)
+        cdf2 = conv[conv["_orig"] == "IN"].copy()
+        if sel_month != "Semua Bulan" and cdf2["_date"].notna().any():
+            cdf2 = cdf2[cdf2["_date"].dt.strftime("%B %Y") == sel_month]
+
+        sess2_msgs = cdf2.groupby("_sess")["_msg"].apply(
+            lambda x: " ".join(x.dropna().astype(str))
+        ).reset_index()
+        sess2_msgs.columns = ["_sess","_all_msgs"]
+        sess2_info = cdf2.groupby("_sess").agg(
+            _phone=("_phone","first"), _date=("_date","min"),
+            _n_pesan=("_msg","count"), _types=("_type", lambda x: ",".join(x.dropna().unique()))
+        ).reset_index()
+        sess2 = sess2_msgs.merge(sess2_info, on="_sess", how="left")
+        sess2["_phone_norm"] = sess2["_phone"].apply(normalize_phone)
+
+        def classify_l1_2(msg):
+            m = msg.lower()
+            for label, pats in L1_RULES:
+                for p in pats:
+                    if _re.search(p, m): return label
+            return "Lainnya"
+
+        sess2["_l1"] = sess2["_all_msgs"].apply(classify_l1_2)
+
+        # Rebuild lookup (ulang karena scope)
+        rek_map2 = {}
+        if df_rekap is not None:
+            rp2  = find_col(df_rekap, ["no_wa","NoWA",col_phone_rekap])
+            rnk2 = find_col(df_rekap, ["body_param_2","body_param_1",col_nokontrak_rek])
+            if rp2:
+                for _, row in df_rekap.iterrows():
+                    norm = normalize_phone(str(row.get(rp2,"")))
+                    nok  = str(row.get(rnk2,"")).strip() if rnk2 else ""
+                    if norm and norm != "62": rek_map2[norm] = nok
+
+        sc_map2 = {}
+        if df_sc is not None:
+            snk2  = find_col(df_sc, ["NOKONTRAK","nokontrak",col_nokontrak_sc])
+            slp2  = find_col(df_sc, ["lastpaiddate","LastPaidDate",col_lastpaid])
+            snam2 = find_col(df_sc, ["custname","CustName",col_custname])
+            scb2  = find_col(df_sc, ["branchname","BranchName",col_branch])
+            sop2  = find_col(df_sc, ["ospokok",col_ospokok])
+            sar2  = find_col(df_sc, ["osar",col_osar])
+            if snk2:
+                for _, row in df_sc.iterrows():
+                    nok = str(row.get(snk2,"")).strip()
+                    if not nok: continue
+                    lp  = row.get(slp2) if slp2 else None
+                    bayar = pd.notna(lp) and str(lp).strip() not in ["","nan","NaT","None","0"]
+                    sc_map2[nok] = {
+                        "bayar":  bayar, "tgl": str(lp) if bayar else "",
+                        "nama":   str(row.get(snam2,"")) if snam2 else "",
+                        "cabang": str(row.get(scb2,""))  if scb2  else "",
+                        "ospokok":str(row.get(sop2,""))  if sop2  else "",
+                        "osar":   str(row.get(sar2,""))  if sar2  else "",
+                    }
+
+        rows_detail = []
+        for _, row in sess2.iterrows():
+            nok = rek_map2.get(row["_phone_norm"],"")
+            sc  = sc_map2.get(nok,{}) if nok else {}
+            rows_detail.append({
+                "No HP":        row["_phone_norm"],
+                "No Kontrak":   nok,
+                "Nama":         sc.get("nama",""),
+                "Cabang":       sc.get("cabang",""),
+                "Kategori":     row["_l1"],
+                "Pesan":        str(row["_all_msgs"])[:120],
+                "Jumlah Pesan": row["_n_pesan"],
+                "Status Bayar": "Bayar" if sc.get("bayar") is True else ("Belum" if sc.get("bayar") is False else "Unknown"),
+                "Tgl Bayar":    sc.get("tgl",""),
+                "OS Pokok":     sc.get("ospokok",""),
+                "OS AR":        sc.get("osar",""),
+                "Tgl Chat":     row["_date"],
+            })
+
+        detail_df = pd.DataFrame(rows_detail)
+
+        # Filter
+        st.markdown('<p class="sh">Filter</p>', unsafe_allow_html=True)
+        fc1, fc2, fc3 = st.columns(3)
+        with fc1:
+            kat_f = st.selectbox("Kategori", ["Semua"] + L1_ORDER, key="det_kat")
+        with fc2:
+            stat_f = st.selectbox("Status Bayar", ["Semua","Bayar","Belum","Unknown"], key="det_stat")
+        with fc3:
+            kw_f = st.text_input("Cari No HP / Kontrak / Nama", key="det_kw")
+
+        df_show = detail_df.copy()
+        if kat_f  != "Semua": df_show = df_show[df_show["Kategori"] == kat_f]
+        if stat_f != "Semua": df_show = df_show[df_show["Status Bayar"] == stat_f]
+        if kw_f:
+            mask = df_show.apply(lambda r: r.astype(str).str.contains(kw_f, case=False, na=False)).any(axis=1)
+            df_show = df_show[mask]
+
+        st.markdown(f'<p style="font-size:11px;color:#94A3B8;margin-bottom:6px">Menampilkan <b>{len(df_show):,}</b> dari <b>{len(detail_df):,}</b> sesi</p>', unsafe_allow_html=True)
+        st.dataframe(df_show, use_container_width=True, height=450)
 
         st.download_button(
-            f"Download {sel_l1_tbl}{' - ' + sel_l2_tbl if sel_l2_tbl != 'Semua' else ''} (.xlsx)",
-            to_xlsx(show_df),
-            f"funnel_{sel_l1_tbl.lower().replace(' ','_')}.xlsx",
+            "Download Excel",
+            to_xlsx(df_show),
+            f"detail_kontrak_{sel_month.replace(' ','_')}.xlsx",
             "application/vnd.ms-excel"
         )
+
+
+# ═══════════════════════════════════════════════════════════
+# TAB 4 — ANALISIS TEKS (regex)
+# ═══════════════════════════════════════════════════════════
+if has_conv and "Analisis Teks" in ti:
+    with tab_objs[ti["Analisis Teks"]]:
+
+        at_df = conv[conv["_orig"] == "IN"].copy()
+        if sel_month != "Semua Bulan" and at_df["_date"].notna().any():
+            at_df = at_df[at_df["_date"].dt.strftime("%B %Y") == sel_month]
+        at_text = at_df[at_df["_type"] == "text"]["_msg"].dropna().astype(str)
+        total_text = len(at_text)
+
+        st.markdown(f'<div class="info-box">Menganalisis <b>{total_text:,}</b> pesan teks bebas (type = text) dari Conversation.</div>', unsafe_allow_html=True)
+
+        NOMINAL_PATS = [
+            (r"rp\.?\s*(\d[\d\.,]+)",      "Rp nominal"),
+            (r"(\d[\d\.,]+)\s*(?:ribu|rb)", "X ribu/rb"),
+            (r"(\d[\d\.,]+)\s*(?:juta|jt)", "X juta/jt"),
+            (r"(\d[\d\.,]+)\s*k\b",         "Xk"),
+        ]
+        TANGGAL_PATS = [
+            (r"\b(besok|esok)\b",                          "Besok"),
+            (r"\b(lusa)\b",                                "Lusa"),
+            (r"\b(hari\s*ini|skrg|sekarang)\b",            "Hari ini"),
+            (r"\b(minggu\s*dep[ae]n)\b",                   "Minggu depan"),
+            (r"\b(senin|selasa|rabu|kamis|jumat|sabtu)\b", "Nama hari"),
+            (r"\btanggal\s*(\d{1,2})\b",                   "Tanggal X"),
+            (r"\btgl\s*(\d{1,2})\b",                       "Tgl X"),
+        ]
+        KATEGORI_PATS = [
+            (r"\b(sudah|udah)\s*(bayar|transfer|tf)\b",       "Konfirmasi Bayar"),
+            (r"\b(sudah\s*lunas|lunas)\b",                     "Klaim Lunas"),
+            (r"\b(bukti|struk|screenshot)\b",                  "Kirim Bukti"),
+            (r"\b(janji|akan|mau)\s*(bayar|transfer)\b",       "Janji Bayar"),
+            (r"\b(tidak\s*bisa|gabisa|belum\s*bisa)\b",        "Tidak Bisa Bayar"),
+            (r"\b(cicil|nyicil|dicicil)\b",                    "Minta Cicil"),
+            (r"\b(nego|denda|keringanan|restruktur)\b",        "Nego/Restruktur"),
+            (r"\b(salah\s*nomor|bukan\s*saya|wrong\s*number)\b","Salah Nomor"),
+            (r"\b(stop|jangan|hapus|unsubscribe)\b",           "Minta Stop"),
+            (r"\b(sudah\s*lunas|lunas)\b",                     "Klaim Lunas"),
+        ]
+
+        def count_pats(series, pats):
+            return {lbl: int(series.str.contains(p, case=False, regex=True, na=False).sum())
+                    for p, lbl in pats if series.str.contains(p, case=False, regex=True, na=False).sum() > 0}
+
+        def bar_html(d, total, colors):
+            if not d: return '<p style="color:#94A3B8;font-size:12px">Tidak ada pola ditemukan.</p>'
+            out = ""
+            for i,(lbl,cnt) in enumerate(sorted(d.items(),key=lambda x:-x[1])):
+                pv = cnt/total if total else 0
+                c  = colors[i%len(colors)]
+                out += (f'<div class="brow"><div class="blbl">{lbl[:26]}</div>'
+                        f'<div class="btrk"><div class="bfil" style="width:{pv*100:.1f}%;background:{c}">'
+                        f'<span class="bnum">{cnt:,}</span></div></div>'
+                        f'<div class="bpct">{pv:.1%}</div></div>')
+            return out
+
+        CA = ["#2563EB","#3B82F6","#60A5FA","#93C5FD"]
+        CB = ["#0F766E","#14B8A6","#2DD4BF"]
+        CC = ["#7C3AED","#15803D","#DC2626","#D97706","#0891B2","#DB2777","#475569","#B45309","#0E7490","#65A30D","#9333EA","#1D4ED8"]
+
+        nom_d = count_pats(at_text, NOMINAL_PATS)
+        tgl_d = count_pats(at_text, TANGGAL_PATS)
+        kat_d = count_pats(at_text, KATEGORI_PATS)
+
+        st.markdown('<p class="sh">Deteksi Nominal Uang</p>', unsafe_allow_html=True)
+        col_n1, col_n2 = st.columns([3,2])
+        with col_n1:
+            st.markdown(f'<div class="card">{bar_html(nom_d, total_text, CA)}</div>', unsafe_allow_html=True)
+        with col_n2:
+            # Statistik nominal
+            all_nom = []
+            for msg in at_text:
+                for p, _ in NOMINAL_PATS:
+                    for m in _re.finditer(p, msg.lower()):
+                        try:
+                            v = int(m.group(1).replace(".","").replace(",",""))
+                            if "ribu" in p or "rb" in p: v *= 1000
+                            elif "juta" in p or "jt" in p: v *= 1_000_000
+                            elif r"\bk\b" in p: v *= 1000
+                            if 1000 <= v <= 500_000_000: all_nom.append(v)
+                        except: pass
+            if all_nom:
+                arr = np.array(all_nom)
+                st.markdown(f'''<div class="card">
+                  <p class="sh" style="margin-bottom:8px">Statistik Nominal</p>
+                  <table class="t">
+                    <tr><td class="left">Jumlah deteksi</td><td style="font-weight:700;color:#1D4ED8">{len(arr):,}</td></tr>
+                    <tr><td class="left">Median</td><td style="font-weight:700">Rp {int(np.median(arr)):,}</td></tr>
+                    <tr><td class="left">Rata-rata</td><td style="font-weight:700">Rp {int(np.mean(arr)):,}</td></tr>
+                    <tr><td class="left">Terkecil</td><td style="font-weight:700">Rp {int(arr.min()):,}</td></tr>
+                    <tr><td class="left">Terbesar</td><td style="font-weight:700">Rp {int(arr.max()):,}</td></tr>
+                  </table></div>''', unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown('<p class="sh">Deteksi Tanggal / Waktu Janji</p>', unsafe_allow_html=True)
+        st.markdown(f'<div class="card">{bar_html(tgl_d, total_text, CB)}</div>', unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown('<p class="sh">Klasifikasi Kategori via Regex</p>', unsafe_allow_html=True)
+        ka1, ka2 = st.columns([3,2])
+        with ka1:
+            st.markdown(f'<div class="card">{bar_html(kat_d, total_text, CC)}</div>', unsafe_allow_html=True)
+        with ka2:
+            if kat_d:
+                fig_pie = go.Figure(go.Pie(
+                    labels=list(kat_d.keys()), values=list(kat_d.values()),
+                    hole=0.45, textinfo="percent",
+                    marker=dict(colors=CC[:len(kat_d)]),
+                ))
+                fig_pie.update_layout(height=280, margin=dict(l=0,r=0,t=10,b=0),
+                    paper_bgcolor="rgba(0,0,0,0)", font=dict(family="Inter",color="#64748B",size=10),
+                    legend=dict(font=dict(size=9),bgcolor="rgba(0,0,0,0)"))
+                st.plotly_chart(fig_pie, use_container_width=True)
+
+        # Custom regex
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown('<p class="sh">Custom Regex</p>', unsafe_allow_html=True)
+        cr1, cr2 = st.columns([4,1])
+        with cr1: custom_pat = st.text_input("Pattern:", placeholder=r"contoh: \btransfer\b", key="cust_regex")
+        with cr2: case_s = st.checkbox("Case sensitive", value=False, key="cust_case")
+        if custom_pat:
+            try:
+                flags = 0 if case_s else _re.IGNORECASE
+                matched = at_text[at_text.str.contains(custom_pat, flags=flags, regex=True, na=False)]
+                st.markdown(f'<p style="font-size:12px;color:#15803D;font-weight:600">Ditemukan di <b>{len(matched):,}</b> pesan ({pct(len(matched),total_text)} dari teks bebas)</p>', unsafe_allow_html=True)
+                if len(matched):
+                    vc = matched.value_counts().head(30).reset_index()
+                    vc.columns = ["Pesan","Jumlah"]
+                    st.dataframe(vc, use_container_width=True, height=300)
+            except _re.error as e:
+                st.error(f"Regex tidak valid: {e}")
 
 
 # ═══════════════════════════════════════════════════════════
